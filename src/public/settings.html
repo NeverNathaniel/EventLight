@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EventLight — Settings</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Archivo:wght@400;600;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <!-- Component script must load before Alpine so x-data="settings()" resolves. -->
+  <script defer src="/js/settings.js"></script>
+  <script defer src="/js/vendor/alpine.min.js"></script>
+</head>
+<body x-data="settings()" x-init="init()" x-cloak>
+  <div class="bulbs" aria-hidden="true">
+    <template x-for="i in 12" :key="i"><span class="bulb"></span></template>
+  </div>
+
+  <header class="wrap">
+    <div class="topbar">
+      <div>
+        <h1 class="wordmark">SET<span class="lit">TINGS</span></h1>
+        <div class="tagline">Sources · preferences · maintenance</div>
+      </div>
+      <a class="backlink" href="/">← Back to dashboard</a>
+    </div>
+  </header>
+
+  <main class="wrap" style="padding-bottom:60px">
+
+    <!-- API KEYS -->
+    <section class="settings-section">
+      <h2>API Keys</h2>
+      <p class="desc">Stored in <code>.env</code> on this machine — never sent anywhere but the source APIs. Leave a field blank to keep the current value.</p>
+      <div class="row">
+        <div class="grow"><div class="name">Ticketmaster</div><div class="sub">Discovery API consumer key</div></div>
+        <span class="badge" :class="data.apiKeys.ticketmaster ? 'set' : 'unset'" x-text="data.apiKeys.ticketmaster ? 'configured' : 'not set'"></span>
+        <input type="password" x-model="keys.ticketmaster" placeholder="new key…" style="min-width:220px" />
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Bandsintown</div><div class="sub">App ID</div></div>
+        <span class="badge" :class="data.apiKeys.bandsintown ? 'set' : 'unset'" x-text="data.apiKeys.bandsintown ? 'configured' : 'not set'"></span>
+        <input type="password" x-model="keys.bandsintown" placeholder="new app id…" style="min-width:220px" />
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Eventbrite</div><div class="sub">Private OAuth token</div></div>
+        <span class="badge" :class="data.apiKeys.eventbrite ? 'set' : 'unset'" x-text="data.apiKeys.eventbrite ? 'configured' : 'not set'"></span>
+        <input type="password" x-model="keys.eventbrite" placeholder="new token…" style="min-width:220px" />
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn btn-accent" @click="saveKeys()">Save keys</button>
+      </div>
+    </section>
+
+    <!-- GENRE WEIGHTS -->
+    <section class="settings-section">
+      <h2>Genre Weights</h2>
+      <p class="desc">Layer 1 of the preference engine. Each genre you weight (1–5) boosts matching events in Top Picks and the relevance sort.</p>
+      <template x-for="g in data.genres" :key="g.genre">
+        <div class="row">
+          <div class="grow"><div class="name" x-text="g.genre"></div></div>
+          <div class="weight-pills">
+            <template x-for="w in [1,2,3,4,5]" :key="w">
+              <button :class="{ on: g.weight===w }" @click="setWeight(g.genre, w)" x-text="w"></button>
+            </template>
+          </div>
+          <button class="btn btn-ghost btn-danger" @click="delGenre(g.genre)">Remove</button>
+        </div>
+      </template>
+      <div class="row">
+        <input type="text" class="grow" x-model="newGenre" placeholder="Add a genre, e.g. shoegaze" @keydown.enter="addGenre()" />
+        <button class="btn" @click="addGenre()">Add genre</button>
+      </div>
+    </section>
+
+    <!-- LEARNED SIGNALS -->
+    <section class="settings-section">
+      <h2>Learned Signals</h2>
+      <p class="desc">Layer 2 — tags and artists picked up from events you mark Interested. These decay over time and boost similar events automatically.</p>
+      <template x-if="!data.preferences.length">
+        <p class="sub">No signals yet. Mark a few events Interested and they'll show up here.</p>
+      </template>
+      <div class="tags" style="margin-top:6px">
+        <template x-for="p in sortedPrefs()" :key="p.tag">
+          <span class="tag score" x-text="p.tag + ' · ' + p.signal_count"></span>
+        </template>
+      </div>
+    </section>
+
+    <!-- FEEDS -->
+    <section class="settings-section">
+      <h2>RSS / iCal Feeds</h2>
+      <p class="desc">Edit <code>feeds.json</code> without touching code. Disable a feed to skip it on refresh; the URL note flags any that may need verifying.</p>
+      <template x-for="f in data.feeds" :key="f.id">
+        <div class="row">
+          <label class="toggle"><input type="checkbox" :checked="f.enabled !== false" @change="toggleFeed(f)" /></label>
+          <div class="grow">
+            <div class="name" x-text="f.name"></div>
+            <div class="sub" x-text="(f.type||'rss') + ' · ' + f.url"></div>
+            <div class="sub" x-text="lastRun(f.id)"></div>
+          </div>
+          <button class="btn btn-ghost btn-danger" @click="delFeed(f.id)">Remove</button>
+        </div>
+      </template>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="field"><label>Name</label><input type="text" x-model="newFeed.name" /></div>
+        <div class="field"><label>Type</label><select x-model="newFeed.type"><option value="rss">RSS</option><option value="ical">iCal</option></select></div>
+        <div class="field full"><label>Feed URL</label><input type="url" x-model="newFeed.url" placeholder="https://venue.com/events/feed/" /></div>
+        <div class="field"><label>Venue</label><input type="text" x-model="newFeed.venue" /></div>
+        <div class="field"><label>City</label><input type="text" x-model="newFeed.city" placeholder="Seattle" /></div>
+        <div class="field"><label>Category</label><select x-model="newFeed.category"><option value="music">Music</option><option value="comedy">Comedy</option></select></div>
+        <div class="field" style="align-self:end"><button class="btn" @click="addFeed()">Add feed</button></div>
+      </div>
+    </section>
+
+    <!-- SCRAPERS -->
+    <section class="settings-section">
+      <h2>Web Scrapers</h2>
+      <p class="desc">Venues without a feed or API. Toggle one off if its selectors drift; the status bar and logs flag failures. Run scrapers below after editing.</p>
+      <template x-for="s in data.scrapers" :key="s.id">
+        <div class="row">
+          <label class="toggle"><input type="checkbox" :checked="s.enabled !== false" @change="toggleScraper(s)" /></label>
+          <div class="grow">
+            <div class="name" x-text="s.name"></div>
+            <div class="sub" x-text="s.url"></div>
+            <div class="sub" x-text="'item: ' + (s.selectors?.item || '—')"></div>
+            <div class="sub" x-text="lastRun(s.id)"></div>
+          </div>
+          <button class="btn btn-ghost btn-danger" @click="delScraper(s.id)">Remove</button>
+        </div>
+      </template>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="field"><label>Name</label><input type="text" x-model="newScraper.name" /></div>
+        <div class="field"><label>City</label><input type="text" x-model="newScraper.city" /></div>
+        <div class="field full"><label>Page URL</label><input type="url" x-model="newScraper.url" placeholder="https://venue.com/calendar" /></div>
+        <div class="field full"><label>Item selector (each event)</label><input type="text" x-model="newScraper.item" placeholder=".event, article" /></div>
+        <div class="field"><label>Name selector</label><input type="text" x-model="newScraper.name_sel" placeholder=".event-title, h3" /></div>
+        <div class="field"><label>Date selector</label><input type="text" x-model="newScraper.date_sel" placeholder="time, .event-date" /></div>
+        <div class="field"><label>Ticket link selector</label><input type="text" x-model="newScraper.link_sel" placeholder="a[href*='ticket'], a" /></div>
+        <div class="field" style="align-self:end"><button class="btn" @click="addScraper()">Add scraper</button></div>
+      </div>
+    </section>
+
+    <!-- MAINTENANCE -->
+    <section class="settings-section">
+      <h2>Maintenance</h2>
+      <p class="desc">Schedule: <code x-text="data.cron"></code> · Headless browser: <span x-text="data.headless ? 'on' : 'off (debug)'"></span></p>
+
+      <div class="row">
+        <div class="grow"><div class="name">Run all sources now</div><div class="sub">Ticketmaster · Eventbrite · Bandsintown · Feeds · Scrapers</div></div>
+        <button class="btn btn-accent" @click="refreshAll()" :disabled="busy" x-text="busy ? 'Running…' : 'Refresh all'"></button>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Run a single source</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <template x-for="a in adapters" :key="a">
+            <button class="btn btn-ghost" @click="runAdapter(a)" :disabled="busy" x-text="a"></button>
+          </template>
+        </div>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Export interested events</div><div class="sub">Download an .ics calendar for any app</div></div>
+        <a class="btn" href="/api/export/ics">Export .ics</a>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Clear hidden events</div><div class="sub">Un-hide everything you've dismissed</div></div>
+        <button class="btn btn-ghost btn-danger" @click="clearHidden()">Clear hidden</button>
+      </div>
+    </section>
+
+    <!-- LAST RUN PER SOURCE -->
+    <section class="settings-section">
+      <h2>Last Refresh — by source</h2>
+      <p class="desc">Most recent ingestion run for every source. Hover a failed source for the error.</p>
+      <template x-if="!status.sources.length"><p class="sub">No runs recorded yet.</p></template>
+      <template x-for="s in status.sources" :key="s.source_name">
+        <div class="row">
+          <span class="src-pill" :class="s.status"><span class="sdot"></span><span x-text="s.source_name"></span></span>
+          <div class="grow sub" x-text="relTime(s.run_at) + ' · found ' + s.events_found + ' · added ' + s.events_added"></div>
+          <div class="sub" style="color:var(--danger);max-width:50%" x-text="s.error_msg || ''"></div>
+        </div>
+      </template>
+    </section>
+  </main>
+
+  <div class="toast" x-show="toast" x-text="toast" x-transition x-cloak></div>
+</body>
+</html>
