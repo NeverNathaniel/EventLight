@@ -1,0 +1,36 @@
+{
+  "name": "eventlight",
+  "version": "1.0.0",
+  "description": "Self-hosted local events dashboard for live music and comedy in the Seattle/Tacoma & South Sound area.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "refresh": "node src/cli/refresh.js",
+    "init-db": "node src/db/migrate.js"
+  },
+  "keywords": [
+    "events",
+    "music",
+    "comedy",
+    "seattle",
+    "tacoma",
+    "dashboard"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "node-cron": "^3.0.3",
+    "node-ical": "^0.20.1",
+    "playwright": "^1.56.1",
+    "rss-parser": "^3.13.0"
+  }
+}

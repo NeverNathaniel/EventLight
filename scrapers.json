@@ -1,0 +1,130 @@
+{
+  "scrapers": [
+    {
+      "id": "tractor-tavern",
+      "name": "The Tractor Tavern",
+      "url": "https://tractortavern.com/calendar/",
+      "city": "Seattle",
+      "venue": "The Tractor Tavern",
+      "category": "music",
+      "enabled": true,
+      "waitFor": ".event, .tw-event-item, article",
+      "selectors": {
+        "item": ".event, .tw-event-item, article",
+        "name": ".event-title, .tw-name, h2, h3",
+        "date": ".event-date, .tw-event-date, time",
+        "ticketLink": "a[href*='ticket'], a.tw-buy-tix-btn, a",
+        "image": "img",
+        "price": ".tw-price, .price"
+      }
+    },
+    {
+      "id": "skylark",
+      "name": "Skylark Cafe",
+      "url": "https://www.skylarkcafe.com/calendar",
+      "city": "Seattle",
+      "venue": "Skylark Cafe",
+      "category": "music",
+      "enabled": true,
+      "waitFor": ".eventlist-event, .event, article",
+      "selectors": {
+        "item": ".eventlist-event, .event, article",
+        "name": ".eventlist-title, .event-title, h1, h2, h3",
+        "date": ".eventlist-meta-date, .event-date, time",
+        "ticketLink": "a[href*='ticket'], a",
+        "image": "img",
+        "price": ".price"
+      }
+    },
+    {
+      "id": "new-frontier",
+      "name": "The New Frontier Lounge",
+      "url": "https://www.thenewfrontierlounge.com/calendar",
+      "city": "Tacoma",
+      "venue": "The New Frontier Lounge",
+      "category": "music",
+      "enabled": true,
+      "waitFor": ".eventlist-event, .event, article",
+      "selectors": {
+        "item": ".eventlist-event, .event, article",
+        "name": ".eventlist-title, .event-title, h1, h2, h3",
+        "date": ".eventlist-meta-date, .event-date, time",
+        "ticketLink": "a[href*='ticket'], a",
+        "image": "img",
+        "price": ".price"
+      }
+    },
+    {
+      "id": "full-tilt-georgetown",
+      "name": "Full Tilt Ice Cream (Georgetown)",
+      "url": "https://www.fulltilticecream.com/georgetown",
+      "city": "Seattle",
+      "venue": "Full Tilt (Georgetown)",
+      "category": "music",
+      "enabled": true,
+      "waitFor": ".event, article, .calendar-event",
+      "selectors": {
+        "item": ".event, article, .calendar-event",
+        "name": ".event-title, h2, h3",
+        "date": ".event-date, time",
+        "ticketLink": "a[href*='ticket'], a",
+        "image": "img",
+        "price": ".price"
+      }
+    },
+    {
+      "id": "jazzbones",
+      "name": "Jazzbones",
+      "url": "https://www.jazzbones.com/events",
+      "city": "Tacoma",
+      "venue": "Jazzbones",
+      "category": "music",
+      "enabled": true,
+      "waitFor": ".event, .tw-event-item, article",
+      "selectors": {
+        "item": ".event, .tw-event-item, article",
+        "name": ".event-title, .tw-name, h2, h3",
+        "date": ".event-date, .tw-event-date, time",
+        "ticketLink": "a[href*='ticket'], a.tw-buy-tix-btn, a",
+        "image": "img",
+        "price": ".tw-price, .price"
+      }
+    },
+    {
+      "id": "louie-gs",
+      "name": "Louie G's Pizza",
+      "url": "https://www.louiegspizza.com/events",
+      "city": "Tacoma",
+      "venue": "Louie G's",
+      "category": "music",
+      "enabled": true,
+      "waitFor": ".event, article, .eventlist-event",
+      "selectors": {
+        "item": ".event, article, .eventlist-event",
+        "name": ".event-title, .eventlist-title, h2, h3",
+        "date": ".event-date, .eventlist-meta-date, time",
+        "ticketLink": "a[href*='ticket'], a",
+        "image": "img",
+        "price": ".price"
+      }
+    },
+    {
+      "id": "the-valley",
+      "name": "The Valley",
+      "url": "https://www.thevalleytacoma.com/shows",
+      "city": "Tacoma",
+      "venue": "The Valley",
+      "category": "music",
+      "enabled": true,
+      "waitFor": ".event, article, .eventlist-event",
+      "selectors": {
+        "item": ".event, article, .eventlist-event",
+        "name": ".event-title, .eventlist-title, h2, h3",
+        "date": ".event-date, .eventlist-meta-date, time",
+        "ticketLink": "a[href*='ticket'], a",
+        "image": "img",
+        "price": ".price"
+      }
+    }
+  ]
+}
