@@ -11,12 +11,55 @@ function settings() {
     newFeed: { name: '', url: '', type: 'rss', venue: '', city: '', category: 'music' },
     newScraper: { name: '', url: '', city: '', item: '', name_sel: '', date_sel: '', link_sel: '' },
     adapters: ['ticketmaster', 'eventbrite', 'bandsintown', 'rss', 'scraper'],
+    discover: { url: '', busy: false, result: null, error: null, adding: false },
     busy: false,
     toast: '',
 
     async init() {
       await this.reload();
       await this.loadStatus();
+    },
+
+    // ── Add a venue by URL (auto-discovery) ──────────────────────────────────
+    async runDiscover() {
+      const url = this.discover.url.trim();
+      if (!url) { this.flash('Paste a venue URL first.'); return; }
+      this.discover.busy = true;
+      this.discover.result = null;
+      this.discover.error = null;
+      try {
+        const r = await postJSON('/api/discover', { url });
+        if (r.error) this.discover.error = r.error;
+        else this.discover.result = r;
+      } catch {
+        this.discover.error = 'Discovery failed — check the URL and try again.';
+      } finally {
+        this.discover.busy = false;
+      }
+    },
+    async addDiscovered() {
+      const rec = this.discover.result?.recommended;
+      if (!rec) return;
+      this.discover.adding = true;
+      try {
+        const r = await postJSON('/api/discover/add', { target: rec.target, config: rec.config });
+        if (r.error) { this.flash(r.error); return; }
+        this.flash(`Added ${rec.config.name} as ${this.methodLabel(rec.method)}.`);
+        this.discover.result = null;
+        this.discover.url = '';
+        await this.reload(); // refresh feed/scraper lists below
+      } finally {
+        this.discover.adding = false;
+      }
+    },
+    methodLabel(m) {
+      return { rss: 'RSS feed', ical: 'iCal feed', jsonld: 'Structured data', scrape: 'Scraper' }[m] || m;
+    },
+    discoverSummary(res) {
+      const rec = res.recommended;
+      if (rec.method === 'scrape') return `No feed or API found — will scrape ${rec.config.url}`;
+      const n = rec.sampleCount || 0;
+      return `${n} event(s) found · ${rec.config.url}`;
     },
     async reload() {
       try { this.data = await getJSON('/api/settings'); } catch { this.flash('Could not load settings.'); }

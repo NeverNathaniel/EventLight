@@ -1,0 +1,25 @@
+# EventLight — self-hosted stack.
+#   cp .env.example .env   # add your API keys first
+#   docker compose up --build -d
+#   open http://localhost:3000
+services:
+  eventlight:
+    build: .
+    container_name: eventlight
+    # Host port comes from PORT in .env (default 3000); the app always listens
+    # on 3000 inside the container.
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+      - HEADLESS=true
+    volumes:
+      # Persist the SQLite database across rebuilds.
+      - ./data:/app/data
+      # Bind-mount runtime config so edits in the Settings UI persist on the host.
+      - ./feeds.json:/app/feeds.json
+      - ./scrapers.json:/app/scrapers.json
+      - ./.env:/app/.env
+    restart: unless-stopped

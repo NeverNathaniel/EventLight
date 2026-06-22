@@ -486,12 +486,29 @@ input[type='search'] { min-width: 180px; }
   color: var(--accent);
   border-color: var(--accent-deep);
 }
+.card-reason {
+  font-family: var(--font-title);
+  font-size: 0.86rem;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--accent);
+  border-left: 2px solid var(--accent-deep);
+  padding-left: 9px;
+}
 .card-foot {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-top: auto;
   padding-top: 6px;
+}
+.curated-foot {
+  margin-top: 22px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-dim);
 }
 .price {
   font-family: var(--font-mono);

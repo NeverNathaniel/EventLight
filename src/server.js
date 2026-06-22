@@ -7,6 +7,7 @@ import eventsRouter from './routes/events.js';
 import settingsRouter from './routes/settings.js';
 import refreshRouter from './routes/refresh.js';
 import statusRouter from './routes/status.js';
+import discoverRouter from './routes/discover.js';
 
 // Initialise the database before anything queries it.
 migrate();
@@ -19,6 +20,7 @@ app.use('/api', eventsRouter);
 app.use('/api', settingsRouter);
 app.use('/api', refreshRouter);
 app.use('/api', statusRouter);
+app.use('/api', discoverRouter);
 
 // Static frontend.
 app.use(express.static(PUBLIC_DIR));

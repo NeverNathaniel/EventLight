@@ -40,6 +40,7 @@
       <button class="tab" :class="{ 'is-active': view==='tonight' }" @click="setView('tonight')">Tonight</button>
       <button class="tab" :class="{ 'is-active': view==='week' }" @click="setView('week')">This Week</button>
       <button class="tab" :class="{ 'is-active': view==='top' }" @click="setView('top')">Top Picks</button>
+      <button class="tab" :class="{ 'is-active': view==='curated' }" @click="setView('curated')">Curated</button>
       <button class="tab" :class="{ 'is-active': view==='month' }" @click="setView('month')">This Month</button>
       <button class="tab" :class="{ 'is-active': view==='browse' }" @click="setView('browse')">Browse All</button>
       <span class="tab-spacer"></span>
@@ -155,6 +156,24 @@
       <template x-if="!top.events.length">
         <div class="empty"><div class="big">NO PICKS YET</div><div class="hint">Set genre weights in Settings, or mark a few events Interested to train the engine.</div></div>
       </template>
+    </section>
+
+    <!-- CURATED (built by the /curate Claude Code routine) -->
+    <section x-show="view==='curated' && !loading">
+      <div class="date-hero">
+        <div class="md" style="color:var(--accent)">CURATED</div>
+        <div class="sub" x-text="curated.criteria ? ('“'+curated.criteria+'”') : 'Run /curate in Claude Code'"></div>
+      </div>
+      <div class="cards">
+        <template x-for="ev in curated.events" :key="ev.id"><div x-html="card(ev, true)"></div></template>
+      </div>
+      <template x-if="!curated.events.length">
+        <div class="empty">
+          <div class="big">NO CURATION YET</div>
+          <div class="hint">Run <code>/curate post-punk under $25, soonest first</code> in Claude Code, then refresh this tab. The routine ranks your events and writes the picks here.</div>
+        </div>
+      </template>
+      <div class="curated-foot" x-show="curated.generated_at" x-text="'Generated ' + relTimeOf(curated.generated_at)"></div>
     </section>
 
     <!-- THIS MONTH -->
