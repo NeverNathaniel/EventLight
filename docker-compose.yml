@@ -15,6 +15,11 @@ services:
     environment:
       - PORT=3000
       - HEADLESS=true
+      # Drives the "Tonight" / "This Week" date logic — set to your local zone.
+      - TZ=${TZ:-America/Los_Angeles}
+    # Chromium needs more shared memory than Docker's 64MB default, or it will
+    # crash scraping heavy pages (common symptom inside an LXC).
+    shm_size: "1gb"
     volumes:
       # Persist the SQLite database across rebuilds.
       - ./data:/app/data
