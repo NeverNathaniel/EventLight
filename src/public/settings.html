@@ -117,6 +117,11 @@
     <section class="settings-section">
       <h2>Learned Signals</h2>
       <p class="desc">Layer 2 — tags and artists picked up from events you mark Interested. These decay over time and boost similar events automatically.</p>
+      <template x-if="data.tasteProfile && data.tasteProfile.applied">
+        <p class="sub" style="color:var(--accent)">
+          ♫ Seeded from your Spotify taste profile — <span x-text="data.tasteProfile.artists"></span> artists, <span x-text="data.tasteProfile.genres"></span> genres (<span x-text="data.tasteProfile.generated_at"></span>).
+        </p>
+      </template>
       <template x-if="!data.preferences.length">
         <p class="sub">No signals yet. Mark a few events Interested and they'll show up here.</p>
       </template>

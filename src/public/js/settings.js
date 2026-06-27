@@ -3,7 +3,7 @@ function settings() {
   return {
     data: {
       apiKeys: { ticketmaster: false, bandsintown: false, eventbrite: false },
-      headless: true, cron: '', genres: [], preferences: [], feeds: [], scrapers: [],
+      headless: true, cron: '', genres: [], preferences: [], tasteProfile: null, feeds: [], scrapers: [],
     },
     status: { sources: [] },
     keys: { ticketmaster: '', bandsintown: '', eventbrite: '' },
