@@ -320,7 +320,8 @@ function dashboard() {
           : '';
       const tagsHtml = tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('');
       const price = ev.price_range ? `<span class="price">${esc(ev.price_range)}</span>` : '';
-      const ticket = ev.ticket_url
+      // http(s) only — never render a scraped javascript:/data: URL as an href.
+      const ticket = /^https?:\/\//i.test(ev.ticket_url || '')
         ? `<a class="ticket-btn" href="${esc(ev.ticket_url)}" target="_blank" rel="noopener">Tickets →</a>`
         : '';
       return `

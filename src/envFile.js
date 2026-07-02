@@ -12,8 +12,17 @@ function readRaw() {
   }
 }
 
+// .env values are one line each — strip CR/LF so a crafted value can't inject
+// extra variables into the file.
+function sanitizeValue(value) {
+  return String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+}
+
 // Apply key→value updates, preserving existing lines/comments where possible.
-export function updateEnv(updates) {
+export function updateEnv(rawUpdates) {
+  const updates = Object.fromEntries(
+    Object.entries(rawUpdates).map(([k, v]) => [k, sanitizeValue(v)])
+  );
   const lines = readRaw().split('\n');
   const seen = new Set();
 

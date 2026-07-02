@@ -1,5 +1,6 @@
 // Prepared statements and higher-level query helpers.
 import db from './index.js';
+import { safeHttpUrl } from '../adapters/util.js';
 
 // ── Normalisation / dedupe ──────────────────────────────────────────────
 function norm(s) {
@@ -45,6 +46,7 @@ const updateEvent = db.prepare(`
 function normalizeEvent(raw) {
   if (!raw || !raw.title || !raw.date || !raw.venue) return null;
   const date = String(raw.date).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const title = String(raw.title).trim();
   const venue = String(raw.venue).trim();
   const category = ['music', 'comedy'].includes((raw.category || '').toLowerCase())
@@ -65,8 +67,10 @@ function normalizeEvent(raw) {
     genre_tags: Array.isArray(raw.genre_tags)
       ? raw.genre_tags.join(', ')
       : (raw.genre_tags || ''),
-    ticket_url: raw.ticket_url || null,
-    image_url: raw.image_url || null,
+    // http(s) only — scraped pages can carry javascript:/data: URLs that must
+    // never be stored and later rendered as hrefs.
+    ticket_url: safeHttpUrl(raw.ticket_url),
+    image_url: safeHttpUrl(raw.image_url),
     price_range: raw.price_range || null,
     interested: 0,
     hidden: 0,

@@ -28,6 +28,10 @@ export const REFRESH_ON_START =
 export const HEADLESS =
   String(process.env.HEADLESS ?? 'true').toLowerCase() !== 'false';
 
+// Optional path to a system Chromium/Chrome binary. Useful when the Playwright
+// browser download isn't available (ARM boards, NAS boxes, containers).
+export const CHROMIUM_PATH = process.env.CHROMIUM_PATH || '';
+
 // Geographic search anchors used by the Ticketmaster / Eventbrite adapters.
 export const LOCATIONS = [
   { name: 'Seattle', city: 'Seattle', stateCode: 'WA', latlong: '47.6062,-122.3321' },
@@ -39,6 +43,13 @@ export const SEARCH_RADIUS_MILES = 30;
 // Polite delay (ms) applied between outbound requests within an adapter to
 // respect rate limits.
 export const REQUEST_DELAY_MS = parseInt(process.env.REQUEST_DELAY_MS || '350', 10);
+
+// How many scrapers run at once. Each scraper targets a different site, so a
+// small pool speeds up the run without hitting any one domain harder.
+export const SCRAPER_CONCURRENCY = Math.max(
+  1,
+  Math.min(8, parseInt(process.env.SCRAPER_CONCURRENCY || '3', 10) || 3)
+);
 
 // API keys are read lazily so the Settings page can update .env at runtime.
 export function getApiKeys() {
