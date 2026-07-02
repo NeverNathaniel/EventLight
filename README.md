@@ -48,6 +48,9 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 | `BANDSINTOWN_APP_ID` | [Bandsintown](https://artists.bandsintown.com/support/api-installation) app ID |
 | `EVENTBRITE_API_KEY` | [Eventbrite](https://www.eventbrite.com/platform/api) private OAuth token |
 | `HEADLESS` | `true` (default) or `false` to watch the scraper browser while debugging |
+| `CHROMIUM_PATH` | Optional path to a system Chromium/Chrome binary, for hosts where the Playwright browser download isn't available (ARM boards, NAS boxes) |
+| `SCRAPER_CONCURRENCY` | How many scrapers run at once (default `3`, max `8`) — each scraper is a different site, so this stays polite per-domain |
+| `REQUEST_DELAY_MS` | Polite delay between outbound requests within an adapter (default `350`) |
 | `REFRESH_CRON` | Cron expression for scheduled ingestion (default `0 */6 * * *` — every 6 hours) |
 | `REFRESH_ON_START` | `true` to run a full ingestion when the server boots |
 
@@ -116,10 +119,13 @@ Use **Settings → Web Scrapers → Add scraper**, or edit `scrapers.json`:
 
 - `selectors.item` is the repeating element for each event; the other selectors are queried **within** each item (comma-separated fallback lists are allowed).
 - `waitFor` is an optional selector to wait for on JS-rendered pages.
-- A `<time datetime="…">` element is the most reliable date source.
+- A `<time datetime="…">` element is the most reliable date source — the scraper prefers a `datetime` attribute on the matched date element, then any `time[datetime]` inside the item, then the element's text.
+- Dates without a year (`SAT JUL 4`) get the year inferred: this year, or next year once the date is more than ~45 days in the past. Formats like `Jul 4`, `July 4th, 2026`, `4 Jul 2026`, `7/4`, and `07/04/2026` all parse.
 - To debug selectors visually, set `HEADLESS=false` in `.env` and re-run the scraper from Settings.
 
-**Selector drift** (a site changing its markup) is the usual cause of a scraper returning zero events. EventLight logs this clearly — check the status bar at the bottom of the dashboard, or **Settings → Last Refresh by source**, and `GET /api/status/logs` for the raw log.
+The scraper validates each config before spending a page load on it, blocks image/media/font downloads (faster and lighter on the venue's server), retries a failed navigation once, and caps extraction at 250 items per page so one bad selector can't flood the database.
+
+**Selector drift** (a site changing its markup) is the usual cause of a scraper returning zero events. EventLight logs this clearly and distinguishes the two cases — *no items matched* (fix `selectors.item`) vs. *items matched but none had a usable title + date* (fix the `name`/`date` selectors). Check the status bar at the bottom of the dashboard, or **Settings → Last Refresh by source**, and `GET /api/status/logs` for the raw log.
 
 ---
 
@@ -177,6 +183,16 @@ data/events.db   SQLite database (created at runtime, gitignored)
 | `GET` | `/api/export/ics` | Download interested events as `.ics` |
 
 All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInterested`, `showHidden`) apply to the view endpoints too.
+
+---
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation, and the `.ics` builder.
 
 ---
 
