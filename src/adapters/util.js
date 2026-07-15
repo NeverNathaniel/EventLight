@@ -88,6 +88,16 @@ export function toISODate(input, now = new Date()) {
   }
   const str = String(input).trim();
 
+  // UTC datetimes (…T02:00:00Z) must convert to the server's local date — the
+  // literal date part is the UTC day, which for a US-evening show is usually
+  // tomorrow. Offset datetimes (…-07:00) keep their literal date: that's the
+  // venue-local representation as published.
+  const zulu = str.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z/i);
+  if (zulu) {
+    const d = new Date(zulu[0]);
+    if (!Number.isNaN(d.getTime())) return fromLocalDate(d);
+  }
+
   // Already ISO-ish (2026-07-04, possibly inside a datetime string).
   const iso = str.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (iso) {
@@ -135,6 +145,13 @@ export function toTime(input) {
     return `${pad2(input.getHours())}:${pad2(input.getMinutes())}`;
   }
   const str = String(input);
+
+  // UTC datetimes convert to local wall-clock time (see toISODate).
+  const zulu = str.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z/i);
+  if (zulu) {
+    const d = new Date(zulu[0]);
+    if (!Number.isNaN(d.getTime())) return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
 
   // ISO datetime with explicit time.
   const isoTime = str.match(/T(\d{2}):(\d{2})/);

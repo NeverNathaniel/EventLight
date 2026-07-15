@@ -139,8 +139,8 @@ Each source is an adapter in `src/adapters/`. The scheduler runs them all every 
 | Type | Sources |
 | --- | --- |
 | **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy), Eventbrite (Seattle/Tacoma), Bandsintown (resolves artists you've marked _Interested_) |
-| **RSS / iCal / JSON-LD** | Configured in `feeds.json` (empty by default — most venues don't publish feeds; add one with **Add a Venue by URL**) |
-| **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, New Frontier, Full Tilt, Jazzbones, Louie G's, The Valley, Showbox, Neumos, The Crocodile, Tacoma Comedy Club seeded; Tacoma Dome, Chop Suey, Paramount, Moore included but disabled (better served by the Ticketmaster API) |
+| **RSS / iCal / JSON-LD** | Configured in `feeds.json` — Tacoma Comedy Club seeded (JSON-LD); most other venues don't publish feeds, so add new ones with **Add a Venue by URL** |
+| **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, The Valley, Showbox, Neumos, The Crocodile, Jazzbones seeded with selectors verified against the live sites (2026-07); Tacoma Dome, Chop Suey, Paramount, Moore included but disabled (better served by the Ticketmaster API); New Frontier, Full Tilt, and Louie G's disabled because their domains have expired or changed hands |
 | **Manual** | The **＋ Add** button in the UI |
 
 > **Most Seattle/Tacoma venues don't publish feeds** — they run on JS-rendered ticketing platforms (AXS, Ticketmaster, TicketWeb). So `feeds.json` ships empty. Get coverage from the **Ticketmaster API** (one key covers every venue that sells through it) and from **scrapers** for the rest. Use **Add a Venue by URL** to let EventLight detect whichever method a given site supports.

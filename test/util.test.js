@@ -40,6 +40,20 @@ test('toISODate: month-name dates without a year infer the upcoming year', () =>
   assert.equal(toISODate('Jun 25', NOW), '2026-06-25');
 });
 
+test('toISODate/toTime: UTC (Z) datetimes convert to the local day and time', () => {
+  // 2026-07-16T02:00:00Z is the evening of July 15 in US timezones. The
+  // expected local values are computed with the same clock the code uses, so
+  // this holds in any host timezone.
+  const instant = new Date('2026-07-16T02:00:00Z');
+  const localDate = `${instant.getFullYear()}-${String(instant.getMonth() + 1).padStart(2, '0')}-${String(instant.getDate()).padStart(2, '0')}`;
+  const localTime = `${String(instant.getHours()).padStart(2, '0')}:${String(instant.getMinutes()).padStart(2, '0')}`;
+  assert.equal(toISODate('2026-07-16T02:00:00Z', NOW), localDate);
+  assert.equal(toTime('2026-07-16T02:00:00Z'), localTime);
+  // Offset datetimes keep their literal (venue-local) date and time.
+  assert.equal(toISODate('2026-07-04T19:30:00-07:00', NOW), '2026-07-04');
+  assert.equal(toTime('2026-07-04T19:30:00-07:00'), '19:30');
+});
+
 test('toISODate: month-name dates with an explicit year', () => {
   assert.equal(toISODate('Jul 4, 2026', NOW), '2026-07-04');
   assert.equal(toISODate('4 July 2026', NOW), '2026-07-04');
