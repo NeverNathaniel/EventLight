@@ -6,23 +6,26 @@ A self-hosted dashboard for live **music** and **comedy** across **Seattle, Taco
 - **Preference engine** — manual genre weights + behavioral learning from what you mark _Interested_
 - **Modular ingestion** — one adapter per source; failures are isolated and logged
 - **Local-first** — Node + Express + SQLite, no external database, no build step
+- **Runs in Docker** — one `docker compose up` with persistent volumes ([see below](#run-with-docker-linux))
 
 ---
 
 ## Prerequisites
 
-- **Node.js ≥ 18** (developed on Node 22)
-- A one-time **Playwright Chromium** install for scraping:
+Two ways to run it — pick one:
+
+- **Docker** (recommended for servers/NAS/LXC): Docker Engine with the Compose plugin. See [Run with Docker (Linux)](#run-with-docker-linux).
+- **Bare metal**: **Node.js ≥ 20** (developed on Node 22) plus a one-time **Playwright Chromium** install for scraping:
 
   ```bash
   npx playwright install chromium
   ```
 
-- API keys are optional but recommended (see below). Without keys, the API adapters are skipped and the app runs on feeds + scrapers only.
+API keys are optional but recommended (see below). Without keys, the API adapters are skipped and the app runs on feeds + scrapers only.
 
 ---
 
-## Install & run
+## Install & run (bare metal)
 
 ```bash
 npm install
@@ -34,6 +37,75 @@ npm start
 Open **http://localhost:3000**.
 
 The SQLite database is created automatically at `data/events.db` on first boot. To initialise it explicitly without starting the server: `npm run init-db`.
+
+---
+
+## Run with Docker (Linux)
+
+The image is built on the official **Playwright** base image, so Chromium and every system library it needs are already inside — no `playwright install` step, no browser dependencies on the host. This is the easiest way to run EventLight on a home server, NAS, or Proxmox LXC.
+
+### 1. Install Docker
+
+On a fresh Debian/Ubuntu host ([full instructions for other distros](https://docs.docker.com/engine/install/)):
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER   # then log out and back in
+```
+
+Verify with `docker compose version` — Compose v2 (the `docker compose` plugin, not the old `docker-compose` binary) is required.
+
+### 2. Start the stack
+
+```bash
+git clone https://github.com/NeverNathaniel/EventLight.git
+cd EventLight
+cp .env.example .env             # REQUIRED before the first run — see note below
+docker compose up --build -d
+```
+
+Open **http://\<host\>:3000**.
+
+> **Why `cp .env.example .env` is required first:** Compose bind-mounts `./.env` into the container so API keys saved in the Settings UI persist on the host. If the file doesn't exist, Docker creates a *directory* named `.env` in its place and the container fails to start. Create the file first (empty is fine).
+
+### What the stack gives you
+
+| Piece | Purpose |
+| --- | --- |
+| `./data/` volume | The SQLite database — survives rebuilds and image upgrades |
+| `./feeds.json`, `./scrapers.json` bind mounts | Source config — edits made in the Settings UI persist on the host |
+| `./.env` bind mount | API keys — editable in the Settings UI or by hand |
+| `shm_size: 1gb` | Chromium crashes with Docker's default 64 MB `/dev/shm`, especially inside an LXC |
+| `init: true` | Reaps zombie Chromium processes left behind by the scraper |
+| Healthcheck | `docker ps` shows `healthy` once the API responds |
+| `restart: unless-stopped` | Comes back up after reboots and crashes |
+
+### Configuration
+
+- **Port** — set `PORT=8080` in `.env` to publish on a different host port (the app always listens on 3000 inside the container).
+- **Timezone** — set `TZ=America/Los_Angeles` (the default) in `.env`. This matters: the *Tonight* and *This Week* views compute "today" in the container's timezone, so a wrong `TZ` shifts every view by a day around midnight.
+- All other variables from the [Configure `.env`](#configure-env) table apply as-is.
+
+### Day-2 operations
+
+```bash
+npm run docker:logs                              # tail logs (or: docker compose logs -f)
+docker compose exec eventlight npm run refresh   # one-shot ingestion from the CLI
+docker compose down                              # stop
+git pull && docker compose up --build -d         # upgrade to a new version
+```
+
+**Backup:** everything that matters is on the host — copy `data/events.db` (stop the container first, or use `docker compose exec eventlight node -e "require('better-sqlite3')('data/events.db').backup('data/backup.db')"` for a live-safe snapshot), plus `feeds.json`, `scrapers.json`, and `.env`.
+
+### Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Container exits immediately, logs mention `.env` | `.env` was auto-created as a directory — `docker compose down`, `rmdir .env`, `cp .env.example .env`, `docker compose up -d` |
+| Scrapers crash on heavy pages / "Target crashed" | Increase `shm_size` in `docker-compose.yml` (already 1 GB by default) |
+| *Tonight* shows the wrong day's events | Set `TZ` in `.env` to your zone and restart |
+| Port already in use | Change `PORT` in `.env` and `docker compose up -d` again |
+| `docker ps` shows `unhealthy` | `docker compose logs` — the API isn't responding on 3000 inside the container |
 
 ---
 
@@ -156,10 +228,12 @@ src/
   scoring/       preference engine
   cli/           one-shot refresh command
   public/        frontend (HTML, CSS, vanilla JS + Alpine.js, vendored)
-feeds.json       RSS/iCal feed config (editable in UI)
-scrapers.json    scraper config (editable in UI)
-.env.example     configuration template
-data/events.db   SQLite database (created at runtime, gitignored)
+feeds.json         RSS/iCal feed config (editable in UI)
+scrapers.json      scraper config (editable in UI)
+Dockerfile         Playwright-based image (Chromium included)
+docker-compose.yml one-command stack with persistent volumes
+.env.example       configuration template
+data/events.db     SQLite database (created at runtime, gitignored)
 ```
 
 ---
