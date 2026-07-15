@@ -1,0 +1,38 @@
+# EventLight — self-hosted stack.
+#   cp .env.example .env   # required first — add your API keys
+#   docker compose up --build -d
+#   open http://localhost:3000
+services:
+  eventlight:
+    build: .
+    container_name: eventlight
+    # Host port comes from PORT in .env (default 3000); the app always listens
+    # on 3000 inside the container.
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+      - HEADLESS=true
+      # Drives the "Tonight" / "This Week" date logic — set to your local zone.
+      - TZ=${TZ:-America/Los_Angeles}
+    # Chromium needs more shared memory than Docker's 64MB default, or it will
+    # crash scraping heavy pages (common symptom inside an LXC).
+    shm_size: "1gb"
+    # PID 1 init reaps zombie Chromium processes left behind by the scraper.
+    init: true
+    volumes:
+      # Persist the SQLite database across rebuilds.
+      - ./data:/app/data
+      # Bind-mount runtime config so edits in the Settings UI persist on the host.
+      - ./feeds.json:/app/feeds.json
+      - ./scrapers.json:/app/scrapers.json
+      - ./.env:/app/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/status').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

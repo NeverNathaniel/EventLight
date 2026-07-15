@@ -1,0 +1,14 @@
+node_modules
+data
+.env
+.git
+.gitignore
+.github
+.claude
+test
+*.log
+logs
+test-results
+playwright-report
+*.png
+README.md

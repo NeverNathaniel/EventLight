@@ -9,7 +9,10 @@
     "dev": "node --watch src/server.js",
     "refresh": "node src/cli/refresh.js",
     "init-db": "node src/db/migrate.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
   },
   "keywords": [
     "events",
@@ -22,16 +25,16 @@
   "author": "",
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "axios": "^1.7.7",
-    "better-sqlite3": "^11.5.0",
+    "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "node-cron": "^3.0.3",
     "node-ical": "^0.20.1",
-    "playwright": "^1.56.1",
+    "playwright": "1.61.0",
     "rss-parser": "^3.13.0"
   }
 }
