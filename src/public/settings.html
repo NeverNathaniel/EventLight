@@ -29,6 +29,45 @@
 
   <main class="wrap" style="padding-bottom:60px">
 
+    <!-- ADD A VENUE BY URL -->
+    <section class="settings-section">
+      <h2>Add a Venue by URL</h2>
+      <p class="desc">Paste a venue's website. EventLight checks for an RSS feed, then an iCal feed, then embedded event data (JSON-LD) — and only falls back to scraping if none of those exist.</p>
+      <div class="row">
+        <input type="url" class="grow" x-model="discover.url" placeholder="https://venue.com" @keydown.enter="runDiscover()" />
+        <button class="btn btn-accent" @click="runDiscover()" :disabled="discover.busy" x-text="discover.busy ? 'Checking…' : 'Discover'"></button>
+      </div>
+      <template x-if="discover.error">
+        <p class="sub" style="color:var(--danger)" x-text="discover.error"></p>
+      </template>
+      <template x-if="discover.result && !discover.result.error">
+        <div style="margin-top:8px">
+          <div class="row">
+            <span class="badge" :class="discover.result.recommended.method==='scrape' ? 'unset' : 'set'" x-text="methodLabel(discover.result.recommended.method)"></span>
+            <div class="grow">
+              <div class="name" x-text="discover.result.name"></div>
+              <div class="sub" x-text="discoverSummary(discover.result)"></div>
+            </div>
+            <button class="btn btn-accent" @click="addDiscovered()" :disabled="discover.adding"
+                    x-text="discover.adding ? 'Adding…' : ('Add as ' + methodLabel(discover.result.recommended.method))"></button>
+          </div>
+          <template x-if="discover.result.providers.length">
+            <p class="sub">Also detected: <span x-text="discover.result.providers.join(', ')"></span> — set the matching API key above to pull these automatically.</p>
+          </template>
+          <template x-if="discover.result.recommended.sample && discover.result.recommended.sample.length">
+            <div class="tags" style="margin-top:6px">
+              <template x-for="(s,i) in discover.result.recommended.sample" :key="i">
+                <span class="tag" x-text="s.title + (s.date ? (' · ' + s.date) : '')"></span>
+              </template>
+            </div>
+          </template>
+          <template x-if="discover.result.recommended.note">
+            <p class="sub" x-text="discover.result.recommended.note"></p>
+          </template>
+        </div>
+      </template>
+    </section>
+
     <!-- API KEYS -->
     <section class="settings-section">
       <h2>API Keys</h2>
@@ -78,6 +117,11 @@
     <section class="settings-section">
       <h2>Learned Signals</h2>
       <p class="desc">Layer 2 — tags and artists picked up from events you mark Interested. These decay over time and boost similar events automatically.</p>
+      <template x-if="data.tasteProfile && data.tasteProfile.applied">
+        <p class="sub" style="color:var(--accent)">
+          ♫ Seeded from your Spotify taste profile — <span x-text="data.tasteProfile.artists"></span> artists, <span x-text="data.tasteProfile.genres"></span> genres (<span x-text="data.tasteProfile.generated_at"></span>).
+        </p>
+      </template>
       <template x-if="!data.preferences.length">
         <p class="sub">No signals yet. Mark a few events Interested and they'll show up here.</p>
       </template>

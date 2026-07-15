@@ -2,8 +2,10 @@
 
 A self-hosted dashboard for live **music** and **comedy** across **Seattle, Tacoma, and the South Sound**. EventLight pulls events from APIs, RSS/iCal feeds, and headless web scrapers on a schedule, merges them into one deduplicated list, scores them against your taste, and presents everything in a dark "venue marquee" dashboard.
 
-- **Tonight / This Week / Top Picks / This Month / Browse All** views
+- **Tonight / This Week / Top Picks / Curated / This Month / Browse All** views
 - **Preference engine** — manual genre weights + behavioral learning from what you mark _Interested_
+- **Add a venue by URL** — paste a website and EventLight auto-detects an RSS feed, iCal feed, or embedded event data before falling back to scraping
+- **Curate with Claude Code** — a `/curate` routine filters and ranks your events by plain-English criteria and publishes them to the dashboard
 - **Modular ingestion** — one adapter per source; failures are isolated and logged
 - **Local-first** — Node + Express + SQLite, no external database, no build step
 - **Runs in Docker** — one `docker compose up` with persistent volumes ([see below](#run-with-docker-linux))
@@ -137,11 +139,24 @@ Each source is an adapter in `src/adapters/`. The scheduler runs them all every 
 | Type | Sources |
 | --- | --- |
 | **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy), Eventbrite (Seattle/Tacoma), Bandsintown (resolves artists you've marked _Interested_) |
-| **RSS / iCal** | Configured in `feeds.json` — Showbox, Paramount, Moore, Tacoma Dome, Tacoma Comedy Club, The Crocodile, Neumos, Chop Suey (seeded) |
-| **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark Cafe, New Frontier Lounge, Full Tilt (Georgetown), Jazzbones, Louie G's, The Valley (seeded) |
+| **RSS / iCal / JSON-LD** | Configured in `feeds.json` (empty by default — most venues don't publish feeds; add one with **Add a Venue by URL**) |
+| **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, New Frontier, Full Tilt, Jazzbones, Louie G's, The Valley, Showbox, Neumos, The Crocodile, Tacoma Comedy Club seeded; Tacoma Dome, Chop Suey, Paramount, Moore included but disabled (better served by the Ticketmaster API) |
 | **Manual** | The **＋ Add** button in the UI |
 
-### Add a new RSS / iCal feed
+> **Most Seattle/Tacoma venues don't publish feeds** — they run on JS-rendered ticketing platforms (AXS, Ticketmaster, TicketWeb). So `feeds.json` ships empty. Get coverage from the **Ticketmaster API** (one key covers every venue that sells through it) and from **scrapers** for the rest. Use **Add a Venue by URL** to let EventLight detect whichever method a given site supports.
+
+### Add a venue by URL (auto-discovery)
+
+The fastest way to add a venue: **Settings → Add a Venue by URL**, paste the website, and hit **Discover**. EventLight probes the page in order and recommends the cleanest method:
+
+1. **RSS / Atom feed** — `<link rel="alternate">` autodiscovery tags, then common feed paths
+2. **iCal feed** — `.ics` / `webcal:` links
+3. **JSON-LD** — `schema.org/Event` structured data embedded in the page (parsed directly, no scraping)
+4. **Scrape** — fallback only; adds a scraper template with guessed selectors to tune
+
+It also flags third-party providers it spots (Eventbrite, Bandsintown, Songkick, Ticketmaster, DICE, …) so you know to set the matching API key. Click **Add** and the source is written to `feeds.json` or `scrapers.json`. (Available programmatically via `POST /api/discover`.)
+
+### Add a new RSS / iCal / JSON-LD feed
 
 Either use **Settings → RSS / iCal Feeds → Add feed** in the UI, or edit `feeds.json` directly:
 
@@ -158,11 +173,9 @@ Either use **Settings → RSS / iCal Feeds → Add feed** in the UI, or edit `fe
 }
 ```
 
-- `type` is `rss` or `ical`.
+- `type` is `rss`, `ical`, or `jsonld` (for venue pages with embedded `schema.org/Event` data — set `url` to the page itself).
 - Set `enabled` to `false` to skip it on refresh.
 - No restart needed for UI edits; a hand-edited file is picked up on the next refresh.
-
-> The seeded feed URLs are best-effort guesses. If one 404s it will be logged as an error in the status bar — verify the real feed URL, or move that venue to `scrapers.json`.
 
 ### Add a new scraper
 
@@ -215,21 +228,45 @@ Scores are computed at query time and used for **Top Picks** and the **relevance
 1. **Manual weights (Layer 1)** — in Settings, weight your genres 1–5. An event's base score is the sum of the weights of the genres it matches.
 2. **Behavioral learning (Layer 2)** — when you mark an event _Interested_, its genre tags and artist become signals. Matching events get a boost equal to the summed signal counts, **decayed** by the number of weeks since each signal was last seen (divisor floored at 1).
 
+**Taste-profile seeding:** if a `taste-profile.json` exists at the repo root (this one was derived from the owner's Spotify top artists/tracks), it's imported idempotently on startup — its genres become Layer-1 weights and its artists become Layer-2 signals. Guarded by the `taste_profile_applied` setting; bump `generated_at` in the JSON to re-import, or delete the file to opt out.
+
+---
+
+## Curate with Claude Code
+
+For when you want richer, plain-English filtering than the built-in controls — _"post-punk and indie under $25, nothing on a Monday, soonest first"_ — there's a `/curate` routine you run from [Claude Code](https://claude.com/claude-code) in this repo:
+
+```
+/curate post-punk and indie under $25, soonest first
+```
+
+What happens:
+
+1. The command runs `npm run export-events`, dumping upcoming events to `data/events-export.json` (id, title, venue, date, genres, price, and EventLight's own preference score).
+2. Claude reads that file, selects and **ranks** the events that match your request, and writes `data/curated.json` — each pick with a one-line reason.
+3. Open the **Curated** tab in the dashboard (or refresh it) to see the ranked picks with Claude's reasoning. Interested/Hide work there like any other view.
+
+It's intentionally simple — a single-user, private-repo workflow. The routine lives in `.claude/commands/curate.md`; edit it to change how curation reasons. You can also run the export manually with `npm run export-events` and consume the JSON however you like.
+
 ---
 
 ## Project structure
 
 ```
 src/
-  adapters/      one file per source + the runAll() orchestrator
-  db/            SQLite setup, schema, migrations, query helpers
-  routes/        Express route handlers (events, settings, refresh, status)
-  scheduler/     node-cron job + manual triggers
-  scoring/       preference engine
-  cli/           one-shot refresh command
-  public/        frontend (HTML, CSS, vanilla JS + Alpine.js, vendored)
-feeds.json         RSS/iCal feed config (editable in UI)
+  adapters/        one file per source + the runAll() orchestrator
+  db/              SQLite setup, schema, migrations, query helpers
+  routes/          Express handlers (events, settings, refresh, status, discover)
+  scheduler/       node-cron job + manual triggers
+  scoring/         preference engine
+  cli/             refresh + export-events commands
+  discovery.js     paste-a-URL source auto-discovery (RSS/iCal/JSON-LD/scrape)
+  public/          frontend (HTML, CSS, vanilla JS + Alpine.js, vendored)
+.claude/
+  commands/        /curate Claude Code routine
+feeds.json         RSS/iCal/JSON-LD feed config (editable in UI)
 scrapers.json      scraper config (editable in UI)
+taste-profile.json one-off Spotify-derived preference seed (optional)
 Dockerfile         Playwright-based image (Chromium included)
 docker-compose.yml one-command stack with persistent volumes
 .env.example       configuration template
@@ -245,6 +282,7 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `GET` | `/api/views/tonight` | Today's events |
 | `GET` | `/api/views/week` | This week, grouped by day |
 | `GET` | `/api/views/top-picks` | Highest-scored events, next 30 days |
+| `GET` | `/api/views/curated` | The `/curate` routine's ranked picks (from `data/curated.json`) |
 | `GET` | `/api/views/month?month=YYYY-MM` | Calendar counts + events |
 | `GET` | `/api/events` | Paginated, filterable, sortable list |
 | `POST` | `/api/events` | Add an event manually |
@@ -254,6 +292,8 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `GET` | `/api/status` | Last run per source + scheduler state |
 | `POST` | `/api/refresh` | Run all adapters now |
 | `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `eventbrite`, `bandsintown`, `rss`, `scraper`) |
+| `POST` | `/api/discover` | Probe a venue URL for RSS/iCal/JSON-LD, falling back to a scraper template |
+| `POST` | `/api/discover/add` | Save a discovered source to `feeds.json` / `scrapers.json` |
 | `GET` | `/api/export/ics` | Download interested events as `.ics` |
 
 All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInterested`, `showHidden`) apply to the view endpoints too.

@@ -31,6 +31,7 @@ function dashboard() {
     top: { events: [] },
     month: { month: localISO(new Date()).slice(0, 7), counts: {}, events: [], cells: [], selectedDay: null },
     browse: { events: [], total: 0, page: 1, pages: 1, pageSize: 50 },
+    curated: { criteria: null, generated_at: null, events: [] },
 
     form: blankForm(),
 
@@ -105,6 +106,9 @@ function dashboard() {
           this.week = await getJSON(`/api/views/week?${p}`);
         } else if (this.view === 'top') {
           this.top = await getJSON(`/api/views/top-picks?${p}`);
+        } else if (this.view === 'curated') {
+          // Curated list is Claude's ranking — show it as-is, no extra filters.
+          this.curated = await getJSON('/api/views/curated');
         } else if (this.view === 'month') {
           const data = await getJSON(`/api/views/month?month=${this.month.month}&${p}`);
           this.month.counts = data.counts;
@@ -166,6 +170,7 @@ function dashboard() {
         this.top.events,
         this.browse.events,
         this.month.events,
+        this.curated.events,
         ...this.week.days.map((d) => d.events),
       ];
       return pools.flatMap((pool) => pool.filter((x) => x.id === id));
@@ -324,6 +329,8 @@ function dashboard() {
       const ticket = /^https?:\/\//i.test(ev.ticket_url || '')
         ? `<a class="ticket-btn" href="${esc(ev.ticket_url)}" target="_blank" rel="noopener">Tickets →</a>`
         : '';
+      // Curated picks carry Claude's one-line reasoning.
+      const reason = ev._reason ? `<div class="card-reason">“${esc(ev._reason)}”</div>` : '';
       return `
         <article class="card ${interested ? 'is-interested' : ''}" data-id="${ev.id}">
           <div class="card-time">
@@ -341,9 +348,15 @@ function dashboard() {
             </div>
             <div class="card-meta">${esc(ev.venue || '')}${ev.city ? `<span class="city">${esc(ev.city)}</span>` : ''}</div>
             <div class="tags">${scoreTag}${tagsHtml}</div>
+            ${reason}
             <div class="card-foot">${price}${ticket}</div>
           </div>
         </article>`;
+    },
+
+    // Expose relTime to templates (e.g. the Curated "generated …" footer).
+    relTimeOf(iso) {
+      return relTime(iso);
     },
 
     // ── toast ──────────────────────────────────────────────────────────────────

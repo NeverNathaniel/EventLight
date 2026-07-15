@@ -1,0 +1,36 @@
+{
+  "source": "spotify",
+  "generated_at": "2026-06-24",
+  "note": "Derived once from the owner's Spotify top artists/tracks. Applied idempotently on startup by src/db/applyTasteProfile.js (guarded by the 'taste_profile_applied' setting). Bump generated_at to re-apply. Genres feed Layer 1 (manual weights); artists feed Layer 2 (behavioral signals, repeated by weight).",
+  "genres": [
+    { "genre": "indie rock", "weight": 5 },
+    { "genre": "punk", "weight": 5 },
+    { "genre": "indie", "weight": 4 },
+    { "genre": "rock", "weight": 4 },
+    { "genre": "pop punk", "weight": 4 },
+    { "genre": "emo", "weight": 4 },
+    { "genre": "indie folk", "weight": 4 },
+    { "genre": "folk", "weight": 4 },
+    { "genre": "indie pop", "weight": 4 },
+    { "genre": "synth pop", "weight": 4 },
+    { "genre": "dream pop", "weight": 4 },
+    { "genre": "alternative", "weight": 4 },
+    { "genre": "art rock", "weight": 3 },
+    { "genre": "singer-songwriter", "weight": 3 },
+    { "genre": "electronic", "weight": 3 },
+    { "genre": "pop", "weight": 3 },
+    { "genre": "hip hop", "weight": 2 },
+    { "genre": "r&b", "weight": 2 },
+    { "genre": "jazz", "weight": 1 }
+  ],
+  "artists": [
+    { "name": "PUP", "weight": 5 },
+    { "name": "alt-J", "weight": 4 },
+    { "name": "Cannons", "weight": 3 },
+    { "name": "Bright Eyes", "weight": 2 },
+    { "name": "Ezra Bell", "weight": 2 },
+    { "name": "Laura Stevenson", "weight": 2 },
+    { "name": "Stromae", "weight": 1 },
+    { "name": "Lola Young", "weight": 1 }
+  ]
+}

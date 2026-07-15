@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import db from './index.js';
+import { applyTasteProfile } from './applyTasteProfile.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -10,6 +11,8 @@ export function migrate() {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(schema);
   seedDefaults();
+  // One-off Spotify taste import (idempotent; no-op once applied).
+  applyTasteProfile();
   return db;
 }
 

@@ -5,9 +5,10 @@ import Parser from 'rss-parser';
 import ical from 'node-ical';
 import { readFeeds } from '../configFiles.js';
 import { REQUEST_DELAY_MS, sleep } from '../config.js';
+import { fetchJsonLdEvents } from '../discovery.js';
 import { classify, toISODate, toTime, clean } from './util.js';
 
-export const meta = { id: 'rss', source: 'rss', label: 'RSS / iCal feeds' };
+export const meta = { id: 'rss', source: 'rss', label: 'RSS / iCal / JSON-LD feeds' };
 
 const parser = new Parser({ timeout: 20000 });
 
@@ -56,7 +57,21 @@ async function runFeed(feed) {
   const source_name = feed.id || feed.name;
   try {
     let events = [];
-    if (feed.type === 'ical') {
+    if (feed.type === 'jsonld') {
+      // Schema.org Event data embedded in a venue page (discovered via URL).
+      const found = await fetchJsonLdEvents(feed.url);
+      events = found
+        .map((ev) => ({
+          ...ev,
+          source: 'rss',
+          source_name,
+          venue: ev.venue || feed.venue || feed.name,
+          city: ev.city || feed.city || null,
+          category: ev.category || feed.category || 'music',
+          genre_tags: feed.category ? [feed.category] : ev.genre_tags || [],
+        }))
+        .filter((m) => m.date);
+    } else if (feed.type === 'ical') {
       const data = await ical.async.fromURL(feed.url);
       events = Object.values(data)
         .filter((v) => v.type === 'VEVENT')
