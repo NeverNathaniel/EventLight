@@ -12,7 +12,8 @@
     "test": "node --test \"test/*.test.js\"",
     "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "export-events": "node src/cli/export-events.js"
   },
   "keywords": [
     "events",

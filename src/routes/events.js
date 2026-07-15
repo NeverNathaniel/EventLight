@@ -1,5 +1,8 @@
-// Event listing, the five dashboard views, manual entry, and user actions.
+// Event listing, the dashboard views, manual entry, and user actions.
 import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DATA_DIR } from '../config.js';
 import {
   queryEvents,
   countEvents,
@@ -123,6 +126,29 @@ router.get('/views/top-picks', (req, res) => {
   const limit = Math.min(100, parseInt(req.query.limit, 10) || 50);
   const events = scoreAndRank(queryEvents(filters)).slice(0, limit);
   res.json({ from: today, to: addDays(today, 30), events });
+});
+
+// ── View: Curated (produced by the /curate Claude Code routine) ──────────
+// Reads data/curated.json: { criteria, generated_at, events: [{ id, reason }] }.
+router.get('/views/curated', (req, res) => {
+  const file = path.join(DATA_DIR, 'curated.json');
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return res.json({ criteria: null, generated_at: null, events: [] });
+  }
+  const list = Array.isArray(doc.events) ? doc.events : [];
+  // Resolve ids in the curated order, skipping anything since hidden/deleted.
+  const resolved = list
+    .map((entry) => {
+      const ev = getEventById(entry.id);
+      if (!ev || ev.hidden) return null;
+      return { ...ev, _reason: entry.reason || null };
+    })
+    .filter(Boolean);
+  const events = scoreEvents(resolved).map((e, i) => ({ ...e, _reason: resolved[i]._reason }));
+  res.json({ criteria: doc.criteria || null, generated_at: doc.generated_at || null, events });
 });
 
 // ── View: This Month (calendar dots + events) ────────────────────────────

@@ -8,11 +8,26 @@ import {
   clearHidden,
   queryEvents,
   getPreferences,
+  getSetting,
 } from '../db/queries.js';
 import { readFeeds, writeFeeds, readScrapers, writeScrapers } from '../configFiles.js';
+import { readTasteProfile } from '../db/applyTasteProfile.js';
 import { updateEnv } from '../envFile.js';
 import { getApiKeys, HEADLESS, REFRESH_CRON } from '../config.js';
 import { buildIcs } from '../ics.js';
+
+// Provenance for the imported taste profile (or null if none).
+function tasteProfileInfo() {
+  const p = readTasteProfile();
+  if (!p) return null;
+  return {
+    source: p.source || 'spotify',
+    generated_at: p.generated_at || null,
+    genres: (p.genres || []).length,
+    artists: (p.artists || []).length,
+    applied: getSetting('taste_profile_applied') === (p.generated_at || 'v1'),
+  };
+}
 
 const router = express.Router();
 
@@ -30,6 +45,7 @@ router.get('/settings', (req, res) => {
     cron: REFRESH_CRON,
     genres: getManualGenres(),
     preferences: getPreferences(),
+    tasteProfile: tasteProfileInfo(),
     feeds: readFeeds(),
     scrapers: readScrapers(),
   });
