@@ -248,6 +248,160 @@
         "image": "img",
         "price": ".price"
       }
+    },
+    {
+      "id": "clock-out-lounge",
+      "name": "Clock-Out Lounge",
+      "url": "https://clockoutlounge.com/",
+      "city": "Seattle",
+      "venue": "Clock-Out Lounge",
+      "category": "music",
+      "enabled": true,
+      "note": "TicketWeb widget, server-rendered on the homepage; music + comedy nights. Verified 2026-07 (20 events).",
+      "waitFor": ".tw-section",
+      "selectors": {
+        "item": ".tw-section",
+        "name": ".tw-name",
+        "date": ".tw-date-time",
+        "ticketLink": "a[href*='tm-event'], a[href*='ticketweb'], a",
+        "image": ".event-img, img",
+        "price": ".tw-price, .price"
+      }
+    },
+    {
+      "id": "airport-tavern",
+      "name": "Airport Tavern",
+      "url": "https://airporttavern.com/calendar/",
+      "city": "Tacoma",
+      "venue": "Airport Tavern",
+      "category": "music",
+      "enabled": true,
+      "note": "SeeTickets; the upcoming-shows list (.event-info-block) is server-rendered with full dates — the month calendar only has bare day numbers. Verified 2026-07 (8 events).",
+      "waitFor": ".event-info-block",
+      "selectors": {
+        "item": ".event-info-block",
+        "name": ".event-title",
+        "date": ".event-date",
+        "ticketLink": "a[href*='seetickets'], a[href*='ticket'], a",
+        "image": "img",
+        "price": ".price"
+      }
+    },
+    {
+      "id": "cryptatropa",
+      "name": "Cryptatropa Bar (The Crypt)",
+      "url": "https://www.thecryptbar.com/",
+      "city": "Olympia",
+      "venue": "Cryptatropa",
+      "category": "music",
+      "enabled": true,
+      "note": "Wix Events list, server-rendered with stable data-hook attributes. Verified 2026-07 (5 events). No per-item ticket links in the list markup, so ticket_url is usually empty.",
+      "waitFor": "[data-hook='event-list-item']",
+      "selectors": {
+        "item": "[data-hook='event-list-item']",
+        "name": "[data-hook='ev-list-item-title']",
+        "date": "[data-hook='ev-date']",
+        "ticketLink": "a[href*='event'], a",
+        "image": "img",
+        "price": ".price"
+      }
+    },
+    {
+      "id": "conor-byrne",
+      "name": "Conor Byrne Pub",
+      "url": "https://www.conorbyrnepub.com/events",
+      "city": "Seattle",
+      "venue": "Conor Byrne Pub",
+      "category": "music",
+      "enabled": false,
+      "note": "JS-rendered Squarespace calendar (VenuePilot ticketing) — no server-rendered listing to verify against. Tune selectors with HEADLESS=false, then enable.",
+      "waitFor": ".eventlist-event, .yui3-calendar, [class*='event']",
+      "selectors": {
+        "item": ".eventlist-event, [class*='event-card'], article",
+        "name": ".eventlist-title, h1, h2, h3",
+        "date": "time, [class*='date']",
+        "ticketLink": "a[href*='venuepilot'], a[href*='ticket'], a",
+        "image": "img",
+        "price": ".price"
+      }
+    },
+    {
+      "id": "sunset-tavern",
+      "name": "Sunset Tavern",
+      "url": "https://sunsettavern.com/shows/",
+      "city": "Seattle",
+      "venue": "Sunset Tavern",
+      "category": "music",
+      "enabled": false,
+      "note": "DICE widget — the /shows/ page is a JS shell with no server-rendered events. Tune selectors with HEADLESS=false against the rendered DICE embed, then enable.",
+      "waitFor": "[class*='dice']",
+      "selectors": {
+        "item": "[class*='dice_event'], [class*='EventCard'], article",
+        "name": "h1, h2, h3, [class*='title']",
+        "date": "time, [class*='date']",
+        "ticketLink": "a[href*='dice.fm'], a[href*='ticket'], a",
+        "image": "img",
+        "price": "[class*='price']"
+      }
+    },
+    {
+      "id": "tracyton-movie-house",
+      "name": "Tracyton Movie House",
+      "url": "https://www.tracytonmoviehouse.com/events",
+      "city": "Bremerton",
+      "venue": "Tracyton Movie House",
+      "category": "music",
+      "enabled": false,
+      "note": "VenuePilot JS widget (like Jazzbones) — no server-rendered listing to verify against. Tune selectors with HEADLESS=false, then enable.",
+      "waitFor": "[class*='event']",
+      "selectors": {
+        "item": "[class*='event-card'], li[class*='event'], article, .event",
+        "name": "h1, h2, h3, h4, [class*='title'], [class*='name']",
+        "date": "time, [class*='date']",
+        "ticketLink": "a[href*='ticket'], a",
+        "image": "img",
+        "price": "[class*='price']"
+      }
+    },
+    {
+      "id": "substation",
+      "name": "Substation",
+      "url": "https://www.substationseattle.com/",
+      "city": "Seattle",
+      "venue": "Substation",
+      "category": "music",
+      "enabled": false,
+      "note": "Sells via an Eventbrite organizer page (eventbrite.com/o/substation-18831550522), which is a JS app with unstable markup — not scrapeable reliably. Revisit if EventLight grows Eventbrite-organizer ingestion."
+    },
+    {
+      "id": "club-comedy-seattle",
+      "name": "Club Comedy Seattle",
+      "url": "https://www.eventbrite.com/o/club-comedy-seattle-18936516174",
+      "city": "Seattle",
+      "venue": "Club Comedy Seattle",
+      "category": "comedy",
+      "enabled": false,
+      "note": "Eventbrite organizer page only — JS app with unstable markup, not scrapeable reliably. Revisit if EventLight grows Eventbrite-organizer ingestion."
+    },
+    {
+      "id": "vera-project",
+      "name": "The VERA Project",
+      "url": "https://theveraproject.org/events/",
+      "city": "Seattle",
+      "venue": "The VERA Project",
+      "category": "music",
+      "enabled": false,
+      "note": "No server-rendered listing found on /events/ (site references DICE and an Eventbrite-import plugin). Verify the live calendar path in a browser before enabling."
+    },
+    {
+      "id": "alma-mater",
+      "name": "Alma Mater (Fawcett Hall)",
+      "url": "https://www.almamatertacoma.com/events",
+      "city": "Tacoma",
+      "venue": "Alma Mater",
+      "category": "music",
+      "enabled": false,
+      "note": "Site returns 403 to automated requests on /events, and the homepage event widget showed stale 2021 entries at verification (2026-07). Verify in a real browser before enabling."
     }
   ]
 }
