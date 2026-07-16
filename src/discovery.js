@@ -93,16 +93,21 @@ async function tryIcal(url) {
 }
 
 // ── JSON-LD (schema.org Event) ────────────────────────────────────────────
-function collectEventNodes(node, out) {
-  if (!node || typeof node !== 'object') return;
+// Events are not always top-level or under @graph — venues commonly publish a
+// Place/Organization node with the events nested in an arbitrary property
+// (e.g. Place.Events[...]), so walk every object value (depth-capped).
+function collectEventNodes(node, out, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 12) return;
   if (Array.isArray(node)) {
-    node.forEach((n) => collectEventNodes(n, out));
+    node.forEach((n) => collectEventNodes(n, out, depth + 1));
     return;
   }
-  if (node['@graph']) collectEventNodes(node['@graph'], out);
   const type = node['@type'];
   const types = Array.isArray(type) ? type : [type];
   if (types.some((t) => typeof t === 'string' && /Event/i.test(t))) out.push(node);
+  for (const v of Object.values(node)) {
+    if (v && typeof v === 'object') collectEventNodes(v, out, depth + 1);
+  }
 }
 
 function mapJsonLdEvent(node, baseUrl) {
@@ -129,6 +134,11 @@ function mapJsonLdEvent(node, baseUrl) {
   const title = clean(node.name);
   if (!title) return null;
 
+  // The schema type itself is a strong category signal (ComedyEvent, MusicEvent).
+  const typeText = (Array.isArray(node['@type']) ? node['@type'] : [node['@type']])
+    .filter(Boolean)
+    .join(' ');
+
   return {
     title,
     artist: clean(node.performer?.name) || null,
@@ -137,7 +147,9 @@ function mapJsonLdEvent(node, baseUrl) {
     date,
     time: toTime(start),
     doors_time: toTime(node.doorTime),
-    category: classify(`${title} ${node.description || ''}`, 'music'),
+    // No fallback here: an unclassified event stays null so the consumer
+    // (e.g. a feed's configured category) can supply the default.
+    category: classify(`${typeText} ${title} ${node.description || ''}`, '') || null,
     genre_tags: [],
     ticket_url: ticketUrl ? absoluteUrl(ticketUrl, baseUrl) : null,
     image_url: image ? absoluteUrl(typeof image === 'string' ? image : image.url, baseUrl) : null,

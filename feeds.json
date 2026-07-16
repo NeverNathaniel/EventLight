@@ -1,3 +1,15 @@
 {
-  "feeds": []
+  "feeds": [
+    {
+      "id": "tacoma-comedy",
+      "name": "Tacoma Comedy Club",
+      "url": "https://www.tacomacomedyclub.com/",
+      "type": "jsonld",
+      "city": "Tacoma",
+      "venue": "Tacoma Comedy Club",
+      "category": "comedy",
+      "enabled": true,
+      "note": "The site embeds full schema.org Event data (JSON-LD) — parsed directly, no scraping. Verified 2026-07."
+    }
+  ]
 }

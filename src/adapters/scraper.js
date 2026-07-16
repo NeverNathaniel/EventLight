@@ -44,7 +44,8 @@ export function validateScraperConfig(cfg) {
 
 // Runs in the browser context: pull raw fields per event item using the
 // configured selectors (each may be a comma-separated fallback list).
-function extractInPage({ selectors, maxItems }) {
+// Exported so tests can run the real extraction against captured pages.
+export function extractInPage({ selectors, maxItems }) {
   const items = Array.from(document.querySelectorAll(selectors.item)).slice(0, maxItems);
   const pick = (root, sel) => {
     if (!sel) return null;
@@ -171,9 +172,15 @@ export async function run() {
 
   let browser;
   try {
+    // Honor an egress proxy if the host requires one (common in containers
+    // and corporate networks) — Chromium doesn't read HTTPS_PROXY on its own.
+    const proxyServer = process.env.HTTPS_PROXY || process.env.https_proxy || '';
     browser = await chromium.launch({
       headless: HEADLESS,
       ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}),
+      ...(proxyServer
+        ? { proxy: { server: proxyServer, bypass: process.env.NO_PROXY || undefined } }
+        : {}),
     });
   } catch (err) {
     // Browser failed to launch (e.g. not installed) — report once, don't crash.

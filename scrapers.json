@@ -8,14 +8,15 @@
       "venue": "The Tractor Tavern",
       "category": "music",
       "enabled": true,
-      "waitFor": ".event, .tw-event-item, article",
+      "note": "TicketWeb 'flexmedia' widget, server-rendered. Selectors verified against the live page 2026-07.",
+      "waitFor": ".flexmedia--artistevents",
       "selectors": {
-        "item": ".event, .tw-event-item, article",
-        "name": ".event-title, .tw-name, h2, h3",
-        "date": ".event-date, .tw-event-date, time",
-        "ticketLink": "a[href*='ticket'], a.tw-buy-tix-btn, a",
+        "item": ".flexmedia--artistevents",
+        "name": ".artisteventsname",
+        "date": ".artisteventstime",
+        "ticketLink": "a[href*='ticketweb'], a[href*='ticket'], a",
         "image": "img",
-        "price": ".tw-price, .price"
+        "price": ".artistseventsprice"
       }
     },
     {
@@ -26,84 +27,13 @@
       "venue": "Skylark Cafe",
       "category": "music",
       "enabled": true,
-      "waitFor": ".eventlist-event, .event, article",
+      "note": "Webflow collection, server-rendered. Selectors verified against the live page 2026-07.",
+      "waitFor": ".event-cal",
       "selectors": {
-        "item": ".eventlist-event, .event, article",
-        "name": ".eventlist-title, .event-title, h1, h2, h3",
-        "date": ".eventlist-meta-date, .event-date, time",
-        "ticketLink": "a[href*='ticket'], a",
-        "image": "img",
-        "price": ".price"
-      }
-    },
-    {
-      "id": "new-frontier",
-      "name": "The New Frontier Lounge",
-      "url": "https://www.thenewfrontierlounge.com/calendar",
-      "city": "Tacoma",
-      "venue": "The New Frontier Lounge",
-      "category": "music",
-      "enabled": true,
-      "waitFor": ".eventlist-event, .event, article",
-      "selectors": {
-        "item": ".eventlist-event, .event, article",
-        "name": ".eventlist-title, .event-title, h1, h2, h3",
-        "date": ".eventlist-meta-date, .event-date, time",
-        "ticketLink": "a[href*='ticket'], a",
-        "image": "img",
-        "price": ".price"
-      }
-    },
-    {
-      "id": "full-tilt-georgetown",
-      "name": "Full Tilt Ice Cream (Georgetown)",
-      "url": "https://www.fulltilticecream.com/georgetown",
-      "city": "Seattle",
-      "venue": "Full Tilt (Georgetown)",
-      "category": "music",
-      "enabled": true,
-      "waitFor": ".event, article, .calendar-event",
-      "selectors": {
-        "item": ".event, article, .calendar-event",
-        "name": ".event-title, h2, h3",
-        "date": ".event-date, time",
-        "ticketLink": "a[href*='ticket'], a",
-        "image": "img",
-        "price": ".price"
-      }
-    },
-    {
-      "id": "jazzbones",
-      "name": "Jazzbones",
-      "url": "https://www.jazzbones.com/events",
-      "city": "Tacoma",
-      "venue": "Jazzbones",
-      "category": "music",
-      "enabled": true,
-      "waitFor": ".event, .tw-event-item, article",
-      "selectors": {
-        "item": ".event, .tw-event-item, article",
-        "name": ".event-title, .tw-name, h2, h3",
-        "date": ".event-date, .tw-event-date, time",
-        "ticketLink": "a[href*='ticket'], a.tw-buy-tix-btn, a",
-        "image": "img",
-        "price": ".tw-price, .price"
-      }
-    },
-    {
-      "id": "louie-gs",
-      "name": "Louie G's Pizza",
-      "url": "https://www.louiegspizza.com/events",
-      "city": "Tacoma",
-      "venue": "Louie G's",
-      "category": "music",
-      "enabled": true,
-      "waitFor": ".event, article, .eventlist-event",
-      "selectors": {
-        "item": ".event, article, .eventlist-event",
-        "name": ".event-title, .eventlist-title, h2, h3",
-        "date": ".event-date, .eventlist-meta-date, time",
-        "ticketLink": "a[href*='ticket'], a",
+        "item": ".event-cal",
+        "name": ".text-block-12",
+        "date": ".date",
+        "ticketLink": "a[href*='global-events'], a[href*='ticket'], a",
         "image": "img",
         "price": ".price"
       }
@@ -111,16 +41,17 @@
     {
       "id": "the-valley",
       "name": "The Valley",
-      "url": "https://www.thevalleytacoma.com/shows",
+      "url": "https://www.thevalleytacoma.com/new-events-1",
       "city": "Tacoma",
       "venue": "The Valley",
       "category": "music",
       "enabled": true,
-      "waitFor": ".event, article, .eventlist-event",
+      "note": "Squarespace event list, server-rendered (the old /shows path 404s). Verified 2026-07.",
+      "waitFor": ".eventlist-event",
       "selectors": {
-        "item": ".event, article, .eventlist-event",
-        "name": ".event-title, .eventlist-title, h2, h3",
-        "date": ".event-date, .eventlist-meta-date, time",
+        "item": ".eventlist-event",
+        "name": ".eventlist-title",
+        "date": "time, .eventlist-meta-date",
         "ticketLink": "a[href*='ticket'], a",
         "image": "img",
         "price": ".price"
@@ -129,18 +60,18 @@
     {
       "id": "showbox",
       "name": "The Showbox",
-      "url": "https://www.showboxpresents.com/shows",
+      "url": "https://www.showboxpresents.com/events",
       "city": "Seattle",
       "venue": "The Showbox",
       "category": "music",
       "enabled": true,
-      "note": "AXS-powered, JS-rendered. Tune selectors against the live page; some AXS content loads in an iframe and may not be reachable.",
-      "waitFor": ".event, article, .eventItem, .chakra-linkbox",
+      "note": "AEG events list, server-rendered; covers both The Showbox and Showbox SoDo (all labelled 'The Showbox' here). Verified 2026-07.",
+      "waitFor": ".entry",
       "selectors": {
-        "item": ".event, article, .eventItem, .chakra-linkbox",
-        "name": ".event-title, .eventTitle, h2, h3",
-        "date": "time, .event-date, .eventDate",
-        "ticketLink": "a[href*='ticket'], a[href*='axs'], a",
+        "item": ".entry",
+        "name": "h3 a, h3",
+        "date": ".date-time-container",
+        "ticketLink": "a[href*='/events/detail'], a[href*='axs'], a",
         "image": "img",
         "price": ".price"
       }
@@ -153,13 +84,13 @@
       "venue": "Neumos",
       "category": "music",
       "enabled": true,
-      "note": "AXS-powered, JS-rendered. Tune selectors against the live page.",
-      "waitFor": ".event, article, .eventItem, .seetickets-list-event-container",
+      "note": "AEG events list, server-rendered. Verified 2026-07.",
+      "waitFor": ".eventItem",
       "selectors": {
-        "item": ".event, article, .eventItem, .seetickets-list-event-container",
-        "name": ".event-title, .event_name, h2, h3",
-        "date": "time, .event-date, .event_date",
-        "ticketLink": "a[href*='ticket'], a[href*='axs'], a",
+        "item": ".eventItem",
+        "name": "h3.title a, h3.title, h3",
+        "date": ".m-date__singleDate, .date",
+        "ticketLink": "a[href*='/events/detail'], a[href*='axs'], a",
         "image": "img",
         "price": ".price"
       }
@@ -167,40 +98,80 @@
     {
       "id": "crocodile",
       "name": "The Crocodile",
-      "url": "https://www.thecrocodile.com/events",
+      "url": "https://calendar.thecrocodile.com/",
       "city": "Seattle",
       "venue": "The Crocodile",
       "category": "music",
       "enabled": true,
-      "note": "No feed/API; JS-rendered. Tune selectors against the live page.",
-      "waitFor": ".event, article, .eventItem, .seetickets-list-event-container",
+      "note": "Webflow calendar covering the Crocodile complex (incl. Madame Lou's), server-rendered; the old /events path 404s. Verified 2026-07.",
+      "waitFor": ".uui-layout88_item",
       "selectors": {
-        "item": ".event, article, .eventItem, .seetickets-list-event-container",
-        "name": ".event-title, .event_name, h2, h3",
-        "date": "time, .event-date, .event_date",
-        "ticketLink": "a[href*='ticket'], a",
+        "item": ".uui-layout88_item",
+        "name": "h3.uui-heading-xxsmall-2, h3",
+        "date": ".cal-start-date, time",
+        "ticketLink": "a[href*='/shows/'], a[href*='ticket']",
         "image": "img",
         "price": ".price"
       }
     },
     {
+      "id": "jazzbones",
+      "name": "Jazzbones",
+      "url": "https://www.jazzbones.com/",
+      "city": "Tacoma",
+      "venue": "Jazzbones",
+      "category": "music",
+      "enabled": true,
+      "note": "VenuePilot JS widget (renders into #venuepilot-app) — needs the browser to execute JS; selectors are best-effort and may need tuning with HEADLESS=false. The old /events path 404s.",
+      "waitFor": "#venuepilot-app [class*='event']",
+      "selectors": {
+        "item": "#venuepilot-app [class*='event-card'], #venuepilot-app li[class*='event'], #venuepilot-app article, #venuepilot-app .event",
+        "name": "h1, h2, h3, h4, [class*='title'], [class*='name']",
+        "date": "time, [class*='date']",
+        "ticketLink": "a[href*='ticket'], a",
+        "image": "img",
+        "price": "[class*='price']"
+      }
+    },
+    {
       "id": "tacoma-comedy",
       "name": "Tacoma Comedy Club",
-      "url": "https://tacomacomedyclub.com/",
+      "url": "https://www.tacomacomedyclub.com/",
       "city": "Tacoma",
       "venue": "Tacoma Comedy Club",
       "category": "comedy",
-      "enabled": true,
-      "note": "No feed/API. Often uses a ticketing widget — tune selectors, and check for an embedded calendar iframe.",
-      "waitFor": ".event, article, .eventItem, .seetickets-list-event-container",
-      "selectors": {
-        "item": ".event, article, .eventItem, .seetickets-list-event-container",
-        "name": ".event-title, .event_name, h2, h3",
-        "date": "time, .event-date, .event_date",
-        "ticketLink": "a[href*='ticket'], a",
-        "image": "img",
-        "price": ".price"
-      }
+      "enabled": false,
+      "note": "Ingested via the 'tacoma-comedy' JSON-LD feed in feeds.json instead — the site embeds full schema.org Event data, no scraping needed."
+    },
+    {
+      "id": "new-frontier",
+      "name": "The New Frontier Lounge",
+      "url": "https://www.thenewfrontierlounge.com/",
+      "city": "Tacoma",
+      "venue": "The New Frontier Lounge",
+      "category": "music",
+      "enabled": false,
+      "note": "DO NOT ENABLE: thenewfrontierlounge.com has expired and now serves an unrelated spam site (checked 2026-07). Re-point the url if the venue returns with a new website."
+    },
+    {
+      "id": "full-tilt-georgetown",
+      "name": "Full Tilt Ice Cream (Georgetown)",
+      "url": "https://www.fulltilticecream.com/georgetown",
+      "city": "Seattle",
+      "venue": "Full Tilt (Georgetown)",
+      "category": "music",
+      "enabled": false,
+      "note": "DO NOT ENABLE: fulltilticecream.com has expired and now serves an unrelated spam site (checked 2026-07). Re-point the url if the venue returns with a new website."
+    },
+    {
+      "id": "louie-gs",
+      "name": "Louie G's Pizza",
+      "url": "https://www.louiegspizza.com/events",
+      "city": "Tacoma",
+      "venue": "Louie G's",
+      "category": "music",
+      "enabled": false,
+      "note": "DO NOT ENABLE: louiegspizza.com now hosts an unrelated law-firm site (checked 2026-07). Re-point the url if the venue has a new website."
     },
     {
       "id": "tacoma-dome",
