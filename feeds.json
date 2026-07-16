@@ -10,6 +10,17 @@
       "category": "comedy",
       "enabled": true,
       "note": "The site embeds full schema.org Event data (JSON-LD) — parsed directly, no scraping. Verified 2026-07."
+    },
+    {
+      "id": "emerald-city-comedy",
+      "name": "Emerald City Comedy Club",
+      "url": "https://www.emeraldcitycomedy.com/",
+      "type": "jsonld",
+      "city": "Seattle",
+      "venue": "Emerald City Comedy Club",
+      "category": "comedy",
+      "enabled": true,
+      "note": "Same platform as Tacoma Comedy Club — full schema.org Event JSON-LD on the homepage (137 events at verification, 2026-07)."
     }
   ]
 }
