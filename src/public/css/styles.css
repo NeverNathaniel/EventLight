@@ -872,6 +872,7 @@ input[type='search'] { min-width: 180px; }
 .row .grow { flex: 1; min-width: 120px; }
 .row .name { font-family: var(--font-mono); font-size: 0.8rem; }
 .row .sub { font-family: var(--font-mono); font-size: 0.66rem; color: var(--muted); }
+.row .sub a { color: var(--accent); }
 .weight-pills { display: inline-flex; gap: 4px; }
 .weight-pills button {
   width: 28px;

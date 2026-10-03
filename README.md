@@ -120,8 +120,8 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 | Variable | Purpose |
 | --- | --- |
 | `PORT` | Server port (default `3000`) |
-| `TICKETMASTER_API_KEY` | [Ticketmaster Discovery API](https://developer.ticketmaster.com/) consumer key |
-| `BANDSINTOWN_APP_ID` | [Bandsintown](https://artists.bandsintown.com/support/api-installation) app ID |
+| `TICKETMASTER_API_KEY` | [Ticketmaster Discovery API](https://developer.ticketmaster.com/) consumer key — free, no business needed ([how to get one](#getting-a-ticketmaster-key)) |
+| `BANDSINTOWN_APP_ID` | [Bandsintown](https://artists.bandsintown.com/support/api-installation) app ID — optional; Bandsintown issues these on request and refuses made-up IDs |
 | `EVENTBRITE_API_KEY` | [Eventbrite](https://www.eventbrite.com/platform/api) private OAuth token |
 | `HEADLESS` | `true` (default) or `false` to watch the scraper browser while debugging |
 | `CHROMIUM_PATH` | Optional path to a system Chromium/Chrome binary, for hosts where the Playwright browser download isn't available (ARM boards, NAS boxes) |
@@ -134,6 +134,17 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 
 > API keys are **never** hardcoded — they're read from `.env` exclusively. The Settings page reports only whether each key is configured, never its value.
 
+### Getting a Ticketmaster key
+
+The Discovery API key is free and open to individuals — you don't need a business. Only Ticketmaster's Partner/Commerce APIs (selling tickets) require approval.
+
+1. Register at [developer-account.ticketmaster.com/user/register](https://developer-account.ticketmaster.com/user/register). The form asks for a **Company Name** and **Company Site URL**: your own name and any site you have (a GitHub profile works) are fine.
+2. Confirm the email, log in, and open **My Apps**. A default app is created for you.
+3. Copy its **Consumer Key** — that's the API key. (Ignore the Consumer Secret; the Discovery API doesn't use it.)
+4. Paste it into **Settings → API Keys → Ticketmaster**, or set `TICKETMASTER_API_KEY` in `.env`.
+
+The free tier allows 5,000 calls a day at 5 per second; a full refresh uses about twenty. One key covers every venue that sells through Ticketmaster within 30 miles of Seattle and Tacoma (the Tacoma Dome, Climate Pledge Arena, the Paramount, Moore and Neptune, and many more).
+
 ---
 
 ## Data sources
@@ -143,20 +154,21 @@ Each source is an adapter in `src/adapters/`. The scheduler runs them all every 
 | Type | Sources |
 | --- | --- |
 | **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy, the next 6 months, parking/VIP add-ons filtered out), Eventbrite (Seattle/Tacoma), Bandsintown (resolves your favorite artists and artists you've marked _Interested_) |
-| **Feeds** | Configured in `feeds.json` — Tacoma Comedy Club and Emerald City Comedy Club (JSON-LD), plus Conor Byrne Pub, Jazzbones and Tracyton Movie House (VenuePilot); most other venues don't publish feeds, so add new ones with **Add a Venue by URL** |
-| **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, The Valley, Showbox (every AEG Seattle room, paged through "Load More"), Neumos (paged), The Crocodile, Clock-Out Lounge, Airport Tavern, and Cryptatropa (Olympia) seeded with selectors verified against the live sites (2026-10). Several more ship **disabled** with notes: venues better served by the Ticketmaster API, JS-rendered sites whose selectors need in-browser tuning first, and dead/expired domains |
+| **Feeds** | Configured in `feeds.json` — Tacoma Comedy Club and Emerald City Comedy Club (JSON-LD); Conor Byrne Pub, Jazzbones, Real Art Tacoma and Tracyton Movie House (VenuePilot); The Valley (Squarespace). Add new ones with **Add a Venue by URL** |
+| **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, McMenamins Elks Temple (Tacoma), Showbox (every AEG Seattle room, paged through "Load More"), Neumos (paged), The Crocodile, Clock-Out Lounge, Airport Tavern, and Cryptatropa (Olympia) seeded with selectors verified against the live sites (2026-10). Several more ship **disabled** with notes: venues better served by the Ticketmaster API, JS-rendered sites whose selectors need in-browser tuning first, and dead/expired domains |
 | **Manual** | The **＋ Add** button in the UI |
 
-> **Most Seattle/Tacoma venues don't publish feeds** — they run on JS-rendered ticketing platforms (AXS, Ticketmaster, TicketWeb). So `feeds.json` ships empty. Get coverage from the **Ticketmaster API** (one key covers every venue that sells through it) and from **scrapers** for the rest. Use **Add a Venue by URL** to let EventLight detect whichever method a given site supports.
+> **Few Seattle/Tacoma venues publish a classic RSS or iCal feed** — the big rooms sell through Ticketmaster or AXS, and small ones run their calendars on Squarespace, WordPress or a ticketing widget. Get the big rooms from the **Ticketmaster API** (one key covers every venue that sells through it), and the small ones from the structured feeds those platforms expose (VenuePilot, Squarespace, WordPress's Events Calendar) or a **scraper**. **Add a Venue by URL** detects whichever method a given site supports.
 
 ### Add a venue by URL (auto-discovery)
 
 The fastest way to add a venue: **Settings → Add a Venue by URL**, paste the website, and hit **Discover**. EventLight probes the page in order and recommends the cleanest method:
 
-1. **RSS / Atom feed** — `<link rel="alternate">` autodiscovery tags, then common feed paths
-2. **iCal feed** — `.ics` / `webcal:` links
-3. **JSON-LD** — `schema.org/Event` structured data embedded in the page (parsed directly, no scraping)
-4. **Scrape** — fallback only; adds a scraper template with guessed selectors to tune
+1. **Ticketing and CMS feeds** — a VenuePilot widget, a WordPress site running The Events Calendar (its JSON API), or a Squarespace events page (its `?format=json` view). These carry real start times and full calendars, so they win when present
+2. **RSS / Atom feed** — `<link rel="alternate">` autodiscovery tags, then common feed paths
+3. **iCal feed** — `.ics` / `webcal:` links
+4. **JSON-LD** — `schema.org/Event` structured data embedded in the page (parsed directly, no scraping)
+5. **Scrape** — fallback only; adds a scraper template with guessed selectors to tune
 
 It also flags third-party providers it spots (Eventbrite, Bandsintown, Songkick, Ticketmaster, DICE, …) so you know to set the matching API key. Click **Add** and the source is written to `feeds.json` or `scrapers.json`. (Available programmatically via `POST /api/discover`.)
 
@@ -177,7 +189,7 @@ Either use **Settings → RSS / iCal Feeds → Add feed** in the UI, or edit `fe
 }
 ```
 
-- `type` is `rss`, `ical`, `jsonld` (for venue pages with embedded `schema.org/Event` data — set `url` to the page itself), or `venuepilot` (for venues using the VenuePilot ticketing widget — add `"accountId"`, found in the page's `venuepilotSettings` script; **Add a Venue by URL** fills it in for you).
+- `type` is `rss`, `ical`, `jsonld` (for venue pages with embedded `schema.org/Event` data — set `url` to the page itself), `venuepilot` (for venues using the VenuePilot ticketing widget — add `"accountId"`, found in the page's `venuepilotSettings` script; **Add a Venue by URL** fills it in for you), `squarespace` (set `url` to the Squarespace events page; add `"tz"` if the venue isn't in your server's time zone), or `tribe` (WordPress sites running The Events Calendar — set `url` to the site's home page; an optional `"categories"` list keeps only those event categories).
 - Set `enabled` to `false` to skip it on refresh.
 - No restart needed for UI edits; a hand-edited file is picked up on the next refresh.
 

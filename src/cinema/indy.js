@@ -7,6 +7,7 @@
 // day in the window — a few dozen small requests, a few times a day.
 import axios from 'axios';
 import { USER_AGENT, sleep, REQUEST_DELAY_MS } from '../config.js';
+import { htmlToText } from '../adapters/util.js';
 
 const MOVIE_FIELDS = `id name urlSlug synopsis rating ratingReason duration genre
   posterImage trailerYoutubeId releaseDate directedBy starring tmdbId`;
@@ -29,18 +30,7 @@ function client(theater) {
 }
 
 // Strip the light HTML the theater uses in synopses ("<i>…</i>", "<div><br></div>").
-export function plainText(html) {
-  return String(html || '')
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<\/(?:p|div)>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&rsquo;/g, '’')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+export const plainText = htmlToText;
 
 // Map an Indy movie (plus its collected showtimes) to a movies-table row.
 export function mapIndyMovie(m, showtimes, theater) {

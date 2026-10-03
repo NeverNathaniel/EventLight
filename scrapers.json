@@ -45,8 +45,8 @@
       "city": "Tacoma",
       "venue": "The Valley",
       "category": "music",
-      "enabled": true,
-      "note": "Squarespace event list, server-rendered (the old /shows path 404s). Verified 2026-07.",
+      "enabled": false,
+      "note": "Ingested via the 'the-valley' Squarespace feed in feeds.json instead (structured JSON with start times). Kept as a fallback.",
       "waitFor": ".eventlist-event",
       "selectors": {
         "item": ".eventlist-event",
@@ -425,6 +425,30 @@
       "category": "music",
       "enabled": false,
       "note": "Site returns 403 to automated requests on /events, and the homepage event widget showed stale 2021 entries at verification (2026-07). Verify in a real browser before enabling."
+    },
+    {
+      "id": "mcmenamins-elks-temple",
+      "name": "McMenamins Elks Temple",
+      "url": "https://www.mcmenamins.com/elks-temple",
+      "city": "Tacoma",
+      "venue": "McMenamins Elks Temple",
+      "category": "music",
+      "enabled": true,
+      "note": "Server-rendered event cards for the Elks Temple (mostly the Spanish Ballroom), labelled with the real room. Chain-wide promos ('All Locations') are skipped. Tickets sell through Etix; links go to McMenamins' event page. The page repeats every card in a mobile copy, so only the desktop list (#musiccontents) is read. Verified 2026-10 (~60 events).",
+      "waitFor": "#musiccontents .tm-panel-card.event",
+      "selectors": {
+        "item": "#musiccontents .tm-panel-card.event",
+        "name": ".tm-panel-titlebg .uk-panel-title",
+        "date": ".tm-card-content .uk-panel-title",
+        "time": ".uk-panel-time",
+        "venue": ".tm-card-title span",
+        "ticketLink": "a[href*='/events/']",
+        "image": "img.tm-card-avatar",
+        "price": ".uk-panel-price"
+      },
+      "skipVenues": [
+        "All Locations"
+      ]
     }
   ]
 }

@@ -32,7 +32,7 @@
     <!-- ADD A VENUE BY URL -->
     <section class="settings-section">
       <h2>Add a Venue by URL</h2>
-      <p class="desc">Paste a venue's website. EventLight checks for a VenuePilot ticketing widget, an RSS feed, an iCal feed, then embedded event data (JSON-LD) — and only falls back to scraping if none of those exist.</p>
+      <p class="desc">Paste a venue's website. EventLight checks for a VenuePilot ticketing widget, a WordPress or Squarespace events listing, an RSS feed, an iCal feed, then embedded event data (JSON-LD) — and only falls back to scraping if none of those exist.</p>
       <div class="row">
         <input type="url" class="grow" x-model="discover.url" placeholder="https://venue.com" @keydown.enter="runDiscover()" />
         <button class="btn btn-accent" @click="runDiscover()" :disabled="discover.busy" x-text="discover.busy ? 'Checking…' : 'Discover'"></button>
@@ -73,12 +73,12 @@
       <h2>API Keys</h2>
       <p class="desc">Stored in <code>.env</code> on this machine — never sent anywhere but the source APIs. Leave a field blank to keep the current value.</p>
       <div class="row">
-        <div class="grow"><div class="name">Ticketmaster</div><div class="sub">Discovery API consumer key</div></div>
+        <div class="grow"><div class="name">Ticketmaster</div><div class="sub">Discovery API consumer key · free, no business needed: sign up at <a href="https://developer-account.ticketmaster.com/user/register" target="_blank" rel="noopener">developer.ticketmaster.com</a> with your own name and site in the "Company" fields, then copy the Consumer Key from My Apps</div></div>
         <span class="badge" :class="data.apiKeys.ticketmaster ? 'set' : 'unset'" x-text="data.apiKeys.ticketmaster ? 'configured' : 'not set'"></span>
         <input type="password" x-model="keys.ticketmaster" placeholder="new key…" style="min-width:220px" />
       </div>
       <div class="row">
-        <div class="grow"><div class="name">Bandsintown</div><div class="sub">App ID</div></div>
+        <div class="grow"><div class="name">Bandsintown</div><div class="sub">App ID · optional; Bandsintown issues these on request, and made-up IDs are refused</div></div>
         <span class="badge" :class="data.apiKeys.bandsintown ? 'set' : 'unset'" x-text="data.apiKeys.bandsintown ? 'configured' : 'not set'"></span>
         <input type="password" x-model="keys.bandsintown" placeholder="new app id…" style="min-width:220px" />
       </div>

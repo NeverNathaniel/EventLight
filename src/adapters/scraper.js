@@ -109,6 +109,14 @@ export function extractInPage({ selectors, maxItems }) {
       return null; // an invalid sub-selector shouldn't kill the whole extract
     }
   };
+  // textContent runs block elements together ("…Dearinger</p><p>History Pub"
+  // reads "DearingerHistory Pub"), so space them apart first.
+  const text = (node) => {
+    if (!node) return '';
+    const copy = node.cloneNode(true);
+    copy.querySelectorAll('br, p, div, li, h1, h2, h3, h4, h5, h6').forEach((b) => b.after(' '));
+    return copy.textContent;
+  };
   return items.map((el) => {
     const nameEl = pick(el, selectors.name);
     const dateEl = pick(el, selectors.date);
@@ -126,14 +134,14 @@ export function extractInPage({ selectors, maxItems }) {
       el.querySelector('time[datetime]')?.getAttribute('datetime') ||
       '';
     return {
-      name: nameEl?.textContent || '',
-      date: timeAttr || (dateEl?.textContent || ''),
+      name: text(nameEl),
+      date: timeAttr || text(dateEl),
       link: linkEl?.getAttribute('href') || '',
       image: imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '',
-      price: priceEl?.textContent || '',
-      venue: venueEl?.textContent || '',
-      support: supportEl?.textContent || '',
-      time: timeEl?.textContent || '',
+      price: text(priceEl),
+      venue: text(venueEl),
+      support: text(supportEl),
+      time: text(timeEl),
     };
   });
 }

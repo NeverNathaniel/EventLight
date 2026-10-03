@@ -57,6 +57,30 @@
       "category": "music",
       "enabled": true,
       "note": "VenuePilot widget (The Redwood Theater) — read from VenuePilot's public events API. Verified 2026-10."
+    },
+    {
+      "id": "the-valley",
+      "name": "The Valley",
+      "url": "https://www.thevalleytacoma.com/new-events-1",
+      "type": "squarespace",
+      "city": "Tacoma",
+      "venue": "The Valley",
+      "category": "music",
+      "tz": "America/Los_Angeles",
+      "enabled": true,
+      "note": "Squarespace events page — read as JSON via ?format=json (exact start times, images), replacing the HTML scraper. Verified 2026-10."
+    },
+    {
+      "id": "real-art-tacoma",
+      "name": "Real Art Tacoma",
+      "url": "https://www.realarttacoma.com/events",
+      "type": "venuepilot",
+      "accountId": 284,
+      "city": "Tacoma",
+      "venue": "Real Art Tacoma",
+      "category": "music",
+      "enabled": true,
+      "note": "Tacoma's nonprofit all-ages venue (punk, hardcore, indie). Its Squarespace site embeds a VenuePilot widget — read from VenuePilot's public events API. Verified 2026-10 (15 events)."
     }
   ]
 }

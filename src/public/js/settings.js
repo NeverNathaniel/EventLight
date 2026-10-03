@@ -54,7 +54,7 @@ function settings() {
       }
     },
     methodLabel(m) {
-      return { venuepilot: 'VenuePilot feed', rss: 'RSS feed', ical: 'iCal feed', jsonld: 'Structured data', scrape: 'Scraper' }[m] || m;
+      return { venuepilot: 'VenuePilot feed', tribe: 'WordPress events feed', squarespace: 'Squarespace events feed', rss: 'RSS feed', ical: 'iCal feed', jsonld: 'Structured data', scrape: 'Scraper' }[m] || m;
     },
     discoverSummary(res) {
       const rec = res.recommended;

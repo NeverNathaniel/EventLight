@@ -7,12 +7,13 @@ import { readFeeds } from '../configFiles.js';
 import { REQUEST_DELAY_MS, sleep } from '../config.js';
 import { fetchJsonLdEvents } from '../discovery.js';
 import { fetchVenuePilotEvents } from './venuepilot.js';
+import { fetchSquarespaceEvents, fetchTribeEvents } from './cms.js';
 import { classify, toISODate, toTime, clean } from './util.js';
 
-export const meta = { id: 'rss', source: 'rss', label: 'RSS / iCal / JSON-LD / VenuePilot feeds' };
+export const meta = { id: 'rss', source: 'rss', label: 'Feeds (RSS, iCal, JSON-LD, VenuePilot, Squarespace, WordPress)' };
 
 const parser = new Parser({ timeout: 20000 });
-const FULL_CALENDAR_TYPES = new Set(['ical', 'jsonld', 'venuepilot']);
+const FULL_CALENDAR_TYPES = new Set(['ical', 'jsonld', 'venuepilot', 'squarespace', 'tribe']);
 
 function mapRssItem(item, feed) {
   const text = `${item.title || ''} ${item.contentSnippet || ''}`;
@@ -61,6 +62,10 @@ async function runFeed(feed) {
     let events = [];
     if (feed.type === 'venuepilot') {
       events = await fetchVenuePilotEvents(feed);
+    } else if (feed.type === 'squarespace') {
+      events = await fetchSquarespaceEvents(feed);
+    } else if (feed.type === 'tribe') {
+      events = await fetchTribeEvents(feed);
     } else if (feed.type === 'jsonld') {
       // Schema.org Event data embedded in a venue page (discovered via URL).
       const found = await fetchJsonLdEvents(feed.url);
@@ -88,7 +93,8 @@ async function runFeed(feed) {
         .filter((m) => m.date);
     }
     // These types list a venue's whole calendar; RSS carries only its latest posts.
-    return { source: 'rss', source_name, status: 'ok', events, complete: FULL_CALENDAR_TYPES.has(feed.type) };
+    const complete = FULL_CALENDAR_TYPES.has(feed.type) && !events.truncated;
+    return { source: 'rss', source_name, status: 'ok', events, complete };
   } catch (err) {
     return {
       source: 'rss',
