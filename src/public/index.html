@@ -42,13 +42,14 @@
       <button class="tab" :class="{ 'is-active': view==='top' }" @click="setView('top')">Top Picks</button>
       <button class="tab" :class="{ 'is-active': view==='curated' }" @click="setView('curated')">Curated</button>
       <button class="tab" :class="{ 'is-active': view==='month' }" @click="setView('month')">This Month</button>
+      <button class="tab" :class="{ 'is-active': view==='movies' }" @click="setView('movies')">Movies</button>
       <button class="tab" :class="{ 'is-active': view==='browse' }" @click="setView('browse')">Browse All</button>
       <span class="tab-spacer"></span>
       <button class="tab icon" @click="openAdd()" title="Add an event manually">＋ Add</button>
     </nav>
 
-    <!-- Filter bar -->
-    <div class="filterbar">
+    <!-- Filter bar (events only — the Movies tab has its own filtering) -->
+    <div class="filterbar" x-show="view!=='movies'">
       <div class="filter-group">
         <div class="seg" role="group" aria-label="Category">
           <button :class="{ 'is-active': filters.category==='all' }" @click="setFilter('category','all')">All</button>
@@ -212,6 +213,64 @@
         <h2 class="section-head" x-text="heroDow(month.selectedDay)+' '+heroMd(month.selectedDay)"></h2>
         <div class="cards">
           <template x-for="ev in dayEvents()" :key="ev.id"><div x-html="card(ev)"></div></template>
+        </div>
+      </div>
+    </section>
+
+    <!-- MOVIES (cinema listings; kids' and vapid action films filtered out) -->
+    <section x-show="view==='movies' && !loading">
+      <template x-for="th in movies.theaters" :key="th.id">
+        <div class="date-hero">
+          <div class="md" style="color:var(--accent)">MOVIES</div>
+          <div class="sub">
+            <a :href="th.url" target="_blank" rel="noopener" x-text="th.name + (th.city ? ' · ' + th.city : '')"></a>
+            · kids' movies and vapid action filtered out
+          </div>
+        </div>
+      </template>
+
+      <template x-if="movies.nowPlaying.length">
+        <div class="movie-block">
+          <h2 class="section-head">Now Playing</h2>
+          <div class="movie-grid">
+            <template x-for="m in movies.nowPlaying" :key="m.id"><div x-html="movieCard(m)"></div></template>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="movies.special.length">
+        <div class="movie-block">
+          <h2 class="section-head">Special Screenings</h2>
+          <p class="section-sub">One-nights, repertory and festival screenings — usually gone after a show or two.</p>
+          <template x-for="day in screeningDays()" :key="day.date">
+            <div class="screen-day">
+              <div class="day-head" :class="{ 'is-today': day.date===todayStr }">
+                <span class="dlabel" x-text="day.label"></span><span class="rule"></span>
+              </div>
+              <template x-for="s in day.items" :key="s.key"><div x-html="screeningRow(s)"></div></template>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="movies.comingSoon.length">
+        <div class="movie-block">
+          <h2 class="section-head">Coming Soon</h2>
+          <div class="movie-grid">
+            <template x-for="m in movies.comingSoon" :key="m.id"><div x-html="movieCard(m)"></div></template>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="!movies.nowPlaying.length && !movies.special.length && !movies.comingSoon.length">
+        <div class="empty"><div class="big">NO LISTINGS YET</div><div class="hint">Hit Refresh to pull the cinema schedule.</div></div>
+      </template>
+
+      <div class="movie-filtered" x-show="movies.filtered.length || movies.hidden.length">
+        <button class="linkish" @click="showFilteredMovies=!showFilteredMovies"
+                x-text="(showFilteredMovies ? 'Hide' : 'Show') + ' filtered (' + movies.filtered.length + ')' + (movies.hidden.length ? ' and hidden (' + movies.hidden.length + ')' : '')"></button>
+        <div x-show="showFilteredMovies">
+          <template x-for="m in movies.filtered.concat(movies.hidden)" :key="m.id"><div x-html="filteredRow(m)"></div></template>
         </div>
       </div>
     </section>

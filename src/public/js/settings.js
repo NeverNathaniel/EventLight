@@ -11,7 +11,7 @@ function settings() {
     newArtist: '',
     newFeed: { name: '', url: '', type: 'rss', venue: '', city: '', category: 'music' },
     newScraper: { name: '', url: '', city: '', item: '', name_sel: '', date_sel: '', link_sel: '' },
-    adapters: ['ticketmaster', 'eventbrite', 'bandsintown', 'rss', 'scraper', 'enrich'],
+    adapters: ['ticketmaster', 'eventbrite', 'bandsintown', 'rss', 'scraper', 'cinema', 'enrich'],
     discover: { url: '', busy: false, result: null, error: null, adding: false },
     busy: false,
     toast: '',

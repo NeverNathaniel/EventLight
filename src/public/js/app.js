@@ -32,6 +32,8 @@ function dashboard() {
     month: { month: localISO(new Date()).slice(0, 7), counts: {}, events: [], cells: [], selectedDay: null },
     browse: { events: [], total: 0, page: 1, pages: 1, pageSize: 50 },
     curated: { criteria: null, generated_at: null, events: [] },
+    movies: { theaters: [], nowPlaying: [], special: [], comingSoon: [], filtered: [], hidden: [] },
+    showFilteredMovies: false,
 
     form: blankForm(),
 
@@ -106,6 +108,8 @@ function dashboard() {
           this.week = await getJSON(`/api/views/week?${p}`);
         } else if (this.view === 'top') {
           this.top = await getJSON(`/api/views/top-picks?${p}`);
+        } else if (this.view === 'movies') {
+          this.movies = await getJSON('/api/views/movies');
         } else if (this.view === 'curated') {
           // Curated list is Claude's ranking — show it as-is, no extra filters.
           this.curated = await getJSON('/api/views/curated');
@@ -160,6 +164,8 @@ function dashboard() {
       const id = parseInt(host.dataset.id, 10);
       if (btn.dataset.action === 'interested') this.toggleInterested(id);
       else if (btn.dataset.action === 'hide') this.toggleHide(id);
+      else if (btn.dataset.action === 'hide-movie') this.toggleMovieHidden(id, true);
+      else if (btn.dataset.action === 'unhide-movie') this.toggleMovieHidden(id, false);
     },
 
     // The same event id can appear in several view pools as separate object
@@ -207,6 +213,125 @@ function dashboard() {
       } catch {
         this.flash('Could not hide — try again.');
       }
+    },
+
+    async toggleMovieHidden(id, value) {
+      try {
+        await fetch(`/api/movies/${id}/hidden`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        });
+        if (value) this.flash('Hidden. "Show filtered" at the bottom brings it back.');
+        await this.load();
+      } catch {
+        this.flash('Could not save — try again.');
+      }
+    },
+
+    // ── movies ────────────────────────────────────────────────────────────────
+    movieMeta(m) {
+      const parts = [];
+      if (m.year) parts.push(m.year);
+      if (m.rating) parts.push(m.rating);
+      if (m.runtime) parts.push(`${Math.floor(m.runtime / 60)}h ${String(m.runtime % 60).padStart(2, '0')}m`);
+      if (m.genre) parts.push(m.genre);
+      return parts.join(' · ');
+    },
+    // Upcoming showtimes grouped by local day: [{ label, times: ['7:00p', …] }].
+    showtimeDays(m, maxDays = 4) {
+      const days = new Map();
+      for (const iso of m.showtimes) {
+        const d = new Date(iso);
+        const key = localISO(d);
+        if (!days.has(key)) days.set(key, { key, label: dayLabel(d, this.todayStr), times: [] });
+        days.get(key).times.push(clockTime(d));
+      }
+      const all = [...days.values()];
+      return { shown: all.slice(0, maxDays), more: Math.max(0, all.length - maxDays) };
+    },
+    movieCard(m) {
+      const { shown, more } = this.showtimeDays(m);
+      const last = new Date(m.showtimes[m.showtimes.length - 1]);
+      const daysLeft = (Date.parse(localISO(last)) - Date.parse(this.todayStr)) / 86400000;
+      const opens = this.movies.comingSoon.includes(m);
+      const badge = opens
+        ? `<span class="tag score">Opens ${esc(dayLabel(new Date(m.showtimes[0]), this.todayStr))}</span>`
+        : daysLeft <= 2
+          ? `<span class="tag score">Last show ${esc(dayLabel(last, this.todayStr))}</span>`
+          : '';
+      const scores = [m.mc_score != null ? `MC ${m.mc_score}` : '', m.rt_score != null ? `RT ${m.rt_score}%` : '']
+        .filter(Boolean)
+        .map((s) => `<span class="tag">${esc(s)}</span>`)
+        .join('');
+      const credit = [m.director ? `Dir. ${m.director}` : '', m.starring || ''].filter(Boolean).join(' · ');
+      const times = shown
+        .map((d) => `<div class="st-day"><span class="st-label">${esc(d.label)}</span>${d.times.map((t) => `<span class="st-time">${esc(t)}</span>`).join('')}</div>`)
+        .join('');
+      const poster = /^https?:\/\//i.test(m.poster_url || '')
+        ? `<a class="movie-poster" href="${esc(m.url)}" target="_blank" rel="noopener"><img src="${esc(m.poster_url)}" alt="" loading="lazy" /></a>`
+        : '<div class="movie-poster empty"></div>';
+      const trailer = /^https?:\/\//i.test(m.trailer_url || '')
+        ? `<a class="linkish" href="${esc(m.trailer_url)}" target="_blank" rel="noopener">Trailer</a>`
+        : '';
+      return `
+        <article class="movie" data-id="${m.id}">
+          ${poster}
+          <div class="card-body">
+            <div class="card-top">
+              <h3 class="card-title">${esc(m.title)}</h3>
+              <div class="card-actions"><button class="act hide" data-action="hide-movie" title="Hide this film">✕</button></div>
+            </div>
+            <div class="card-meta">${esc(this.movieMeta(m))}</div>
+            ${credit ? `<div class="movie-credit">${esc(credit)}</div>` : ''}
+            ${m.synopsis ? `<p class="movie-synopsis">${esc(m.synopsis)}</p>` : ''}
+            ${badge || scores ? `<div class="tags">${badge}${scores}</div>` : ''}
+            <div class="showtimes">${times}${more ? `<div class="st-more">+${more} more day${more === 1 ? '' : 's'}</div>` : ''}</div>
+            <div class="card-foot">${trailer}<a class="ticket-btn" href="${esc(m.url)}" target="_blank" rel="noopener">Tickets →</a></div>
+          </div>
+        </article>`;
+    },
+    // Special screenings as a day-by-day program (a film shown twice appears twice).
+    screeningDays() {
+      const days = new Map();
+      for (const m of this.movies.special) {
+        for (const iso of m.showtimes) {
+          const d = new Date(iso);
+          const key = localISO(d);
+          if (!days.has(key)) days.set(key, { date: key, label: dayLabel(d, this.todayStr), items: [] });
+          days.get(key).items.push({ key: `${m.id}-${iso}`, iso, time: clockTime(d), m });
+        }
+      }
+      return [...days.values()]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map((day) => ({ ...day, items: day.items.sort((a, b) => a.iso.localeCompare(b.iso)) }));
+    },
+    screeningRow(s) {
+      const m = s.m;
+      return `
+        <div class="screening" data-id="${m.id}">
+          <span class="screening-time">${esc(s.time)}</span>
+          <div class="screening-body">
+            <a class="screening-title" href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>
+            <span class="screening-meta">${esc(this.movieMeta(m))}${m.director ? ` · Dir. ${esc(m.director)}` : ''}</span>
+          </div>
+          <button class="act hide" data-action="hide-movie" title="Hide this film">✕</button>
+        </div>`;
+    },
+    filteredRow(m) {
+      const why = m.hidden ? 'Hidden by you' : m._filter?.reason || 'Filtered';
+      const action = m.hidden
+        ? '<button class="act" data-action="unhide-movie" title="Show this film again">↺</button>'
+        : '';
+      return `
+        <div class="screening is-filtered" data-id="${m.id}">
+          <span class="screening-time">${esc(dayLabel(new Date(m.showtimes[0]), this.todayStr))}</span>
+          <div class="screening-body">
+            <a class="screening-title" href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>
+            <span class="screening-meta">${esc(why)}</span>
+          </div>
+          ${action}
+        </div>`;
     },
 
     // ── manual entry ──────────────────────────────────────────────────────────
@@ -394,6 +519,21 @@ function blankForm() {
 function localISO(d) {
   const tz = d.getTimezoneOffset() * 60000;
   return new Date(d.getTime() - tz).toISOString().slice(0, 10);
+}
+
+// "Today", "Tomorrow", or "Sat Oct 10" for a Date, relative to todayStr.
+function dayLabel(d, todayStr) {
+  const key = localISO(d);
+  if (key === todayStr) return 'Today';
+  const tomorrow = new Date(`${todayStr}T00:00:00`);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (key === localISO(tomorrow)) return 'Tomorrow';
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Local wall-clock time of a Date as "7:30p".
+function clockTime(d) {
+  return fmtTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
 }
 
 function fmtTime(t) {

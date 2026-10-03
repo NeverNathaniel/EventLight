@@ -8,8 +8,16 @@ import * as rss from './rss.js';
 import * as scraper from './scraper.js';
 import { upsertEvents, logRun, pruneStaleEvents, dbNow } from '../db/queries.js';
 import { enrichArtists } from '../enrich/index.js';
+import { refreshCinemas } from '../cinema/index.js';
 
 export const adapters = [ticketmaster, eventbrite, bandsintown, rss, scraper];
+
+// Cinema listings (the Movies tab) live in their own table, but refresh on the
+// same schedule and report per theater like any other source.
+export const cinemaStep = {
+  meta: { id: 'cinema', source: 'cinema', label: 'Cinemas' },
+  run: refreshCinemas,
+};
 
 // Artist enrichment isn't a source of events, but it runs on the same
 // schedule (after ingestion, so new lineups get looked up) and can be
@@ -128,7 +136,7 @@ export async function runAdapter(adapter) {
 export async function runAll() {
   const startedAt = new Date().toISOString();
   const results = [];
-  for (const adapter of [...adapters, enrichStep]) {
+  for (const adapter of [...adapters, cinemaStep, enrichStep]) {
     const summaries = await runAdapter(adapter);
     results.push(...summaries);
     const label = adapter.meta.label;
@@ -143,5 +151,5 @@ export async function runAll() {
 
 // Look up an adapter module by its meta id.
 export function getAdapterById(id) {
-  return [...adapters, enrichStep].find((a) => a.meta.id === id) || null;
+  return [...adapters, cinemaStep, enrichStep].find((a) => a.meta.id === id) || null;
 }

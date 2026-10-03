@@ -2,7 +2,8 @@
 
 A self-hosted dashboard for live **music** and **comedy** across **Seattle, Tacoma, and the South Sound**. EventLight pulls events from APIs, RSS/iCal feeds, and headless web scrapers on a schedule, merges them into one deduplicated list, scores them against your taste, and presents everything in a dark "venue marquee" dashboard.
 
-- **Tonight / This Week / Top Picks / Curated / This Month / Browse All** views
+- **Tonight / This Week / Top Picks / Curated / This Month / Movies / Browse All** views
+- **Movies** — what's playing at The Grand Cinema (Tacoma), with kids' movies and vapid action movies filtered out
 - **Preference engine** — favorite artists, "sounds like your favorites" discovery, genre weights, and learning from what you star — every pick says *why* it ranks
 - **Artist enrichment** — pulls the bands out of every listing title and looks up their genres (MusicBrainz) and sound-alikes (ListenBrainz) — free, keyless, cached
 - **Add a venue by URL** — paste a website and EventLight auto-detects a VenuePilot widget, RSS feed, iCal feed, or embedded event data before falling back to scraping
@@ -259,6 +260,35 @@ Scores are computed at query time and used for **Top Picks** and the **relevance
 
 ---
 
+## Movies
+
+The **Movies** tab lists everything showing at [The Grand Cinema](https://grandcinema.com) in Tacoma over the next six weeks. It has three sections:
+
+- **Now Playing**: current runs, leaving-soonest first.
+- **Special Screenings**: one-nights, repertory, and the Tacoma Film Festival, as a day-by-day program.
+- **Coming Soon**: runs that open more than a week out.
+
+Each film shows its poster, rating, runtime, director, cast, synopsis, showtimes by day (in your browser's timezone), the trailer, and a ticket link.
+
+**Filtered out** (`src/cinema/filter.js`). Every decision carries a reason, and **Show filtered** at the bottom of the tab lists what was left out and why.
+
+- **Kids' movies**:
+  - rated G;
+  - filed under Family/Kids by the theater;
+  - tagged a children's or family film on Wikidata (unless rated R/NC-17);
+  - animated and rated PG;
+  - kids' programs by name, e.g. "Shorts4Shorties", "Free Family Flick", "Cereal Cinema".
+- **Vapid action movies**: action, superhero or martial-arts films that aren't critically acclaimed.
+  - Franchise and superhero films need Metacritic ≥ 80. *The Dark Knight* and *Mad Max: Fury Road* pass; *Fast X* and most of the MCU don't.
+  - Other action films need Metacritic ≥ 65 or Rotten Tomatoes ≥ 80.
+  - A non-franchise action film with no scores on record gets the benefit of the doubt.
+
+Genres, franchise and critic scores come from [Wikidata](https://www.wikidata.org/), looked up by the TMDB id the theater supplies. It's free, needs no key, and is cached for a week. The ✕ on any film hides it; hidden films are listed under **Show filtered** with a button to bring them back.
+
+**How it's fetched** (`src/cinema/indy.js`). The Grand's website runs on the Indy Systems ticketing platform, whose frontend loads showtimes from a GraphQL endpoint on the theater's own domain. EventLight makes the same requests the site does: one to list the dates with showtimes, then one per date. That's a few dozen small requests per refresh. Note that the theater's `robots.txt` disallows `/graphql` for crawlers. Other Indy Systems cinemas can be added to `THEATERS` in `src/cinema/index.js`; their `site-id` / `circuit-id` are the headers their website sends.
+
+---
+
 ## Curate with Claude Code
 
 For when you want richer, plain-English filtering than the built-in controls — _"post-punk and indie under $25, nothing on a Monday, soonest first"_ — there's a `/curate` routine you run from [Claude Code](https://claude.com/claude-code) in this repo:
@@ -287,6 +317,7 @@ src/
   scheduler/       node-cron job + manual triggers
   scoring/         preference engine
   enrich/          artist genres (MusicBrainz) + similar artists (ListenBrainz)
+  cinema/          movie listings (The Grand Cinema via Indy Systems), Wikidata facts, kids/action filter
   lineup.js        parse the bill (headliner, support) out of an event title
   cli/             refresh + export-events commands
   discovery.js     paste-a-URL source auto-discovery (RSS/iCal/JSON-LD/scrape)
@@ -312,6 +343,8 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `GET` | `/api/views/week` | This week, grouped by day |
 | `GET` | `/api/views/top-picks` | Highest-scored events, next 30 days, plus `artists`: favorite/starred artists' shows in the next year |
 | `GET` | `/api/views/curated` | The `/curate` routine's ranked picks (from `data/curated.json`) |
+| `GET` | `/api/views/movies` | Cinema listings: `nowPlaying`, `special`, `comingSoon`, `filtered` (with reasons), `hidden` |
+| `POST` | `/api/movies/:id/hidden` | Hide (or `{ "value": false }` to unhide) a film |
 | `GET` | `/api/views/month?month=YYYY-MM` | Calendar counts + events |
 | `GET` | `/api/events` | Paginated, filterable, sortable list |
 | `POST` | `/api/events` | Add an event manually |
@@ -320,7 +353,7 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `GET` | `/api/filters` | Distinct cities, sources, tags |
 | `GET` | `/api/status` | Last run per source + scheduler state |
 | `POST` | `/api/refresh` | Run all adapters now |
-| `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `eventbrite`, `bandsintown`, `rss`, `scraper`) or the `enrich` step |
+| `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `eventbrite`, `bandsintown`, `rss`, `scraper`), the `cinema` listings, or the `enrich` step |
 | `POST` | `/api/settings/artists` | Add or re-weight a favorite artist (`{ name, weight }`) |
 | `DELETE` | `/api/settings/artists/:key` | Remove a favorite artist |
 | `POST` | `/api/discover` | Probe a venue URL for RSS/iCal/JSON-LD, falling back to a scraper template |
@@ -337,7 +370,7 @@ All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInter
 npm test
 ```
 
-Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, and the `.ics` builder.
+Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, and the `.ics` builder.
 
 ---
 

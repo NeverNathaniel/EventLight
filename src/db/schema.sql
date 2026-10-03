@@ -92,6 +92,42 @@ CREATE TABLE IF NOT EXISTS similar_artists (
 
 CREATE INDEX IF NOT EXISTS idx_similar_artist ON similar_artists(artist_key);
 
+-- ── Movies (cinema listings) ────────────────────────────────────────────
+-- One row per film per theater, replaced on each refresh. Showtimes are a
+-- JSON array of UTC ISO datetimes. wd_* columns are Wikidata facts looked up
+-- by TMDB id (used by the kids / action filters); hidden is your own ✕.
+CREATE TABLE IF NOT EXISTS movies (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  theater_id     TEXT NOT NULL,             -- e.g. grand-cinema
+  source_id      TEXT NOT NULL,             -- the theater system's movie id
+  theater        TEXT NOT NULL,
+  city           TEXT,
+  title          TEXT NOT NULL,
+  url            TEXT,
+  poster_url     TEXT,
+  trailer_url    TEXT,
+  synopsis       TEXT,
+  rating         TEXT,                      -- MPAA (G, PG, PG-13, R, NC-17)
+  rating_reason  TEXT,
+  runtime        INTEGER,                   -- minutes
+  genre          TEXT,
+  director       TEXT,
+  starring       TEXT,
+  release_date   TEXT,
+  tmdb_id        TEXT,
+  showtimes      TEXT NOT NULL DEFAULT '[]',
+  first_showing  TEXT,
+  last_showing   TEXT,
+  wd_genres      TEXT,                      -- comma-separated
+  wd_series      TEXT,                      -- franchise / film series, if any
+  rt_score       INTEGER,                   -- Rotten Tomatoes %
+  mc_score       INTEGER,                   -- Metacritic /100
+  wd_fetched_at  TEXT,
+  hidden         INTEGER NOT NULL DEFAULT 0,
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (theater_id, source_id)
+);
+
 -- ── Scrape / ingestion log ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS scrape_log (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
