@@ -122,7 +122,6 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 | `PORT` | Server port (default `3000`) |
 | `TICKETMASTER_API_KEY` | [Ticketmaster Discovery API](https://developer.ticketmaster.com/) consumer key — free, no business needed ([how to get one](#getting-a-ticketmaster-key)) |
 | `BANDSINTOWN_APP_ID` | [Bandsintown](https://artists.bandsintown.com/support/api-installation) app ID — optional; Bandsintown issues these on request and refuses made-up IDs |
-| `EVENTBRITE_API_KEY` | [Eventbrite](https://www.eventbrite.com/platform/api) private OAuth token |
 | `HEADLESS` | `true` (default) or `false` to watch the scraper browser while debugging |
 | `CHROMIUM_PATH` | Optional path to a system Chromium/Chrome binary, for hosts where the Playwright browser download isn't available (ARM boards, NAS boxes) |
 | `SCRAPER_CONCURRENCY` | How many scrapers run at once (default `3`, max `8`) — each scraper is a different site, so this stays polite per-domain |
@@ -154,7 +153,7 @@ Each source is an adapter in `src/adapters/`. The scheduler runs them all every 
 
 | Type | Sources |
 | --- | --- |
-| **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy, the next 6 months, parking/VIP add-ons filtered out), Eventbrite (Seattle/Tacoma), Bandsintown (resolves your favorite artists and artists you've marked _Interested_) |
+| **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy, the next 6 months, parking/VIP add-ons filtered out), Bandsintown (resolves your favorite artists and artists you've marked _Interested_) |
 | **Feeds** | Configured in `feeds.json` — Tacoma Comedy Club and Emerald City Comedy Club (JSON-LD); Conor Byrne Pub, Jazzbones, New Frontier Lounge, Real Art Tacoma and Tracyton Movie House (VenuePilot); The Valley (Squarespace). Add new ones with **Add a Venue by URL** |
 | **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, McMenamins Elks Temple (Tacoma), Showbox (every AEG Seattle room, paged through "Load More"), Neumos (paged), The Crocodile, Clock-Out Lounge, Airport Tavern, and Cryptatropa (Olympia) seeded with selectors verified against the live sites (2026-10). Several more ship **disabled** with notes: venues better served by the Ticketmaster API, JS-rendered sites whose selectors need in-browser tuning first, and dead/expired domains |
 | **Manual** | The **＋ Add** button in the UI |
@@ -171,7 +170,7 @@ The fastest way to add a venue: **Settings → Add a Venue by URL**, paste the w
 4. **JSON-LD** — `schema.org/Event` structured data embedded in the page (parsed directly, no scraping)
 5. **Scrape** — fallback only; adds a scraper template with guessed selectors to tune
 
-It also flags third-party providers it spots (Eventbrite, Bandsintown, Songkick, Ticketmaster, DICE, …) so you know to set the matching API key. Click **Add** and the source is written to `feeds.json` or `scrapers.json`. (Available programmatically via `POST /api/discover`.)
+It also flags third-party providers it spots (Ticketmaster, Eventbrite, DICE, AXS, …), so you know where a venue sells tickets. Venues on Ticketmaster are already covered by the Ticketmaster key. (Eventbrite shut down its public event search in 2020, so EventLight no longer has an Eventbrite source.) Click **Add** and the source is written to `feeds.json` or `scrapers.json`. (Available programmatically via `POST /api/discover`.)
 
 ### Add a new RSS / iCal / JSON-LD feed
 
@@ -372,7 +371,7 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `GET` | `/api/filters` | Distinct cities, sources, tags |
 | `GET` | `/api/status` | Last run per source + scheduler state |
 | `POST` | `/api/refresh` | Run all adapters now |
-| `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `eventbrite`, `bandsintown`, `rss`, `scraper`), the `cinema` listings, or the `enrich` step |
+| `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `bandsintown`, `rss`, `scraper`), the `cinema` listings, or the `enrich` step |
 | `POST` | `/api/settings/artists` | Add or re-weight a favorite artist (`{ name, weight }`) |
 | `DELETE` | `/api/settings/artists/:key` | Remove a favorite artist |
 | `POST` | `/api/settings/home` | Set the close-to-home city and boost (`{ city, boost }`, boost one of `0`, `25`, `50`, `100`) |
@@ -391,6 +390,8 @@ npm test
 ```
 
 Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, and the `.ics` builder.
+
+GitHub Actions runs the same suite on every pull request and every push to `main` (`.github/workflows/test.yml`).
 
 ---
 

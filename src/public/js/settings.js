@@ -2,17 +2,17 @@
 function settings() {
   return {
     data: {
-      apiKeys: { ticketmaster: false, bandsintown: false, eventbrite: false },
+      apiKeys: { ticketmaster: false, bandsintown: false },
       headless: true, cron: '', genres: [], artists: [], enrichment: null, preferences: [], tasteProfile: null, feeds: [], scrapers: [],
       home: { city: '', boost: 0, levels: [], cities: [] },
     },
     status: { sources: [] },
-    keys: { ticketmaster: '', bandsintown: '', eventbrite: '' },
+    keys: { ticketmaster: '', bandsintown: '' },
     newGenre: '',
     newArtist: '',
     newFeed: { name: '', url: '', type: 'rss', venue: '', city: '', category: 'music' },
     newScraper: { name: '', url: '', city: '', item: '', name_sel: '', date_sel: '', link_sel: '' },
-    adapters: ['ticketmaster', 'eventbrite', 'bandsintown', 'rss', 'scraper', 'cinema', 'enrich'],
+    adapters: ['ticketmaster', 'bandsintown', 'rss', 'scraper', 'cinema', 'enrich'],
     discover: { url: '', busy: false, result: null, error: null, adding: false },
     busy: false,
     toast: '',
@@ -81,12 +81,12 @@ function settings() {
     // ── API keys ───────────────────────────────────────────────────────────
     async saveKeys() {
       const payload = {};
-      for (const k of ['ticketmaster', 'bandsintown', 'eventbrite']) {
+      for (const k of ['ticketmaster', 'bandsintown']) {
         if (this.keys[k].trim()) payload[k] = this.keys[k].trim();
       }
       if (!Object.keys(payload).length) { this.flash('Enter at least one key.'); return; }
       await postJSON('/api/settings/keys', payload);
-      this.keys = { ticketmaster: '', bandsintown: '', eventbrite: '' };
+      this.keys = { ticketmaster: '', bandsintown: '' };
       await this.reload();
       this.flash('API keys saved.');
     },

@@ -33,7 +33,7 @@ export const HEADLESS =
 // browser download isn't available (ARM boards, NAS boxes, containers).
 export const CHROMIUM_PATH = process.env.CHROMIUM_PATH || '';
 
-// Geographic search anchors used by the Ticketmaster / Eventbrite adapters.
+// Geographic search anchors used by the Ticketmaster adapter.
 export const LOCATIONS = [
   { name: 'Seattle', city: 'Seattle', stateCode: 'WA', latlong: '47.6062,-122.3321' },
   { name: 'Tacoma', city: 'Tacoma', stateCode: 'WA', latlong: '47.2529,-122.4443' },
@@ -74,7 +74,6 @@ export function getApiKeys() {
   return {
     ticketmaster: process.env.TICKETMASTER_API_KEY || '',
     bandsintown: process.env.BANDSINTOWN_APP_ID || '',
-    eventbrite: process.env.EVENTBRITE_API_KEY || '',
   };
 }
 

@@ -3,14 +3,13 @@
 // logs each source's run to scrape_log. Adapter failures are isolated.
 import * as ticketmaster from './ticketmaster.js';
 import * as bandsintown from './bandsintown.js';
-import * as eventbrite from './eventbrite.js';
 import * as rss from './rss.js';
 import * as scraper from './scraper.js';
 import { upsertEvents, logRun, pruneStaleEvents, dbNow } from '../db/queries.js';
 import { enrichArtists } from '../enrich/index.js';
 import { refreshCinemas } from '../cinema/index.js';
 
-export const adapters = [ticketmaster, eventbrite, bandsintown, rss, scraper];
+export const adapters = [ticketmaster, bandsintown, rss, scraper];
 
 // Cinema listings (the Movies tab) live in their own table, but refresh on the
 // same schedule and report per theater like any other source.

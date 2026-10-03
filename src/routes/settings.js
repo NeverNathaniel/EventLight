@@ -60,7 +60,6 @@ router.get('/settings', (req, res) => {
     apiKeys: {
       ticketmaster: Boolean(keys.ticketmaster),
       bandsintown: Boolean(keys.bandsintown),
-      eventbrite: Boolean(keys.eventbrite),
     },
     headless: HEADLESS,
     cron: REFRESH_CRON,
@@ -77,11 +76,10 @@ router.get('/settings', (req, res) => {
 
 // ── API keys (written to .env) ─────────────────────────────────────────────
 router.post('/settings/keys', (req, res) => {
-  const { ticketmaster, bandsintown, eventbrite } = req.body || {};
+  const { ticketmaster, bandsintown } = req.body || {};
   const updates = {};
   if (ticketmaster !== undefined) updates.TICKETMASTER_API_KEY = ticketmaster;
   if (bandsintown !== undefined) updates.BANDSINTOWN_APP_ID = bandsintown;
-  if (eventbrite !== undefined) updates.EVENTBRITE_API_KEY = eventbrite;
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: 'No keys provided' });
   }
