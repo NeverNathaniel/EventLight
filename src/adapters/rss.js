@@ -12,6 +12,7 @@ import { classify, toISODate, toTime, clean } from './util.js';
 export const meta = { id: 'rss', source: 'rss', label: 'RSS / iCal / JSON-LD / VenuePilot feeds' };
 
 const parser = new Parser({ timeout: 20000 });
+const FULL_CALENDAR_TYPES = new Set(['ical', 'jsonld', 'venuepilot']);
 
 function mapRssItem(item, feed) {
   const text = `${item.title || ''} ${item.contentSnippet || ''}`;
@@ -27,7 +28,7 @@ function mapRssItem(item, feed) {
     date,
     time: toTime(item.title) || toTime(item.isoDate),
     doors_time: null,
-    category: classify(text, feed.category || 'music'),
+    category: classify(text, feed.category || 'music', item.title),
     genre_tags: feed.category ? [feed.category] : [],
     ticket_url: item.link || null,
     image_url: item.enclosure?.url || null,
@@ -46,7 +47,7 @@ function mapIcalEvent(ev, feed) {
     date: toISODate(ev.start),
     time: toTime(ev.start),
     doors_time: null,
-    category: classify(`${ev.summary || ''} ${ev.description || ''}`, feed.category || 'music'),
+    category: classify(`${ev.summary || ''} ${ev.description || ''}`, feed.category || 'music', ev.summary),
     genre_tags: feed.category ? [feed.category] : [],
     ticket_url: ev.url || null,
     image_url: null,
@@ -86,8 +87,8 @@ async function runFeed(feed) {
         .map((item) => mapRssItem(item, feed))
         .filter((m) => m.date);
     }
-    // An RSS feed carries only its latest posts; the other types are full calendars.
-    return { source: 'rss', source_name, status: 'ok', events, complete: feed.type !== 'rss' && Boolean(feed.type) };
+    // These types list a venue's whole calendar; RSS carries only its latest posts.
+    return { source: 'rss', source_name, status: 'ok', events, complete: FULL_CALENDAR_TYPES.has(feed.type) };
   } catch (err) {
     return {
       source: 'rss',

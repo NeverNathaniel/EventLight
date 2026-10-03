@@ -113,16 +113,22 @@ export const upsertEvents = db.transaction((rawList) => {
 });
 
 // Drop upcoming listings a source no longer shows (cancelled, moved, or a
-// re-labelled venue), after a successful run of that source. Rows you starred
-// or hid are kept so your choices aren't lost if a listing flickers.
-export function pruneStaleEvents(sourceName, runStartedAt, today) {
-  return db
-    .prepare(
-      `DELETE FROM events
-       WHERE source_name = ? AND date >= ? AND updated_at < ?
-         AND interested = 0 AND hidden = 0`
-    )
-    .run(sourceName, today, runStartedAt).changes;
+// re-labelled venue), after a complete, successful run of that source.
+//   - Today's shows are kept: venues often drop a show from the calendar the
+//     day of, or once doors open.
+//   - Rows you starred or hid are kept so your choices aren't lost.
+//   - If a run would remove more than 40% of the source's upcoming shows, it's
+//     far more likely the scrape broke than that the venue cancelled half its
+//     calendar — nothing is removed. Returns the number of rows deleted.
+const MAX_PRUNE_SHARE = 0.4;
+export function pruneStaleEvents(source, sourceName, runStartedAt, today) {
+  const where = `source = @source AND source_name = @sourceName AND date > @today`;
+  const params = { source, sourceName, today, runStartedAt };
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM events WHERE ${where}`).get(params).n;
+  const staleWhere = `${where} AND updated_at < @runStartedAt AND interested = 0 AND hidden = 0`;
+  const stale = db.prepare(`SELECT COUNT(*) AS n FROM events WHERE ${staleWhere}`).get(params).n;
+  if (!stale || stale > Math.max(3, total * MAX_PRUNE_SHARE)) return 0;
+  return db.prepare(`DELETE FROM events WHERE ${staleWhere}`).run(params).changes;
 }
 
 export function dbNow() {
@@ -165,11 +171,12 @@ function buildWhere(filters = {}) {
     clauses.push('(title LIKE @search OR artist LIKE @search OR venue LIKE @search)');
     params.search = `%${filters.search}%`;
   }
-  // Genre tags: match any of the requested tags (OR).
+  // Genre tags: match any of the requested tags (OR), in the source's tags
+  // or the genres looked up for the lineup.
   if (Array.isArray(filters.genres) && filters.genres.length) {
     const sub = filters.genres.map((g, i) => {
       params[`genre${i}`] = `%${g}%`;
-      return `genre_tags LIKE @genre${i}`;
+      return `(genre_tags LIKE @genre${i} OR artist_tags LIKE @genre${i})`;
     });
     clauses.push(`(${sub.join(' OR ')})`);
   }
@@ -242,15 +249,23 @@ export function getDistinctSources() {
     .map((r) => r.source_name);
 }
 
+// Filter facets: every source tag, plus looked-up artist genres common enough
+// to be useful (on 3+ events) so the list doesn't fill with one-offs.
 export function getAllTags() {
-  const rows = db.prepare("SELECT genre_tags FROM events WHERE genre_tags != ''").all();
   const set = new Set();
-  for (const { genre_tags } of rows) {
+  for (const { genre_tags } of db.prepare("SELECT genre_tags FROM events WHERE genre_tags != ''").all()) {
     genre_tags.split(',').forEach((t) => {
       const tag = t.trim().toLowerCase();
       if (tag) set.add(tag);
     });
   }
+  const counts = new Map();
+  for (const { artist_tags } of db.prepare("SELECT artist_tags FROM events WHERE artist_tags != ''").all()) {
+    for (const t of new Set(artist_tags.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean))) {
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+  }
+  for (const [tag, n] of counts) if (n >= 3) set.add(tag);
   return [...set].sort();
 }
 

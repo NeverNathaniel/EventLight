@@ -60,3 +60,37 @@ test('a near-empty run is treated as breakage, not cancellations', async () => {
   assert.equal(summary.pruned, 0);
   assert.ok(titles().includes('B'));
 });
+
+test('a run that would prune most of a source is treated as breakage', async () => {
+  db.exec("DELETE FROM events WHERE source_name = 'venue'");
+  const listing = 'ABCDEFGHIJ'.split('').map((t) => show(t));
+  await runAdapter(fakeAdapter(listing, { complete: true }));
+  await wait();
+  // Only half the calendar came back (say, page 2 of the listing failed).
+  const [summary] = await runAdapter(fakeAdapter(listing.slice(0, 5), { complete: true }));
+  assert.equal(summary.pruned, 0);
+  assert.equal(titles().length, 10);
+});
+
+test("today's shows are never pruned (venues drop them the day of)", async () => {
+  db.exec("DELETE FROM events WHERE source_name = 'venue'");
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const listing = ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((t) => show(t)).concat(show('Tonight', today));
+  await runAdapter(fakeAdapter(listing, { complete: true }));
+  await wait();
+  await runAdapter(fakeAdapter(listing.slice(0, 7), { complete: true }));
+  assert.ok(titles().includes('Tonight'));
+});
+
+test('a feed and a scraper sharing an id never prune each other', async () => {
+  db.exec("DELETE FROM events WHERE source_name = 'venue'");
+  const asFeed = (events) => ({
+    meta: { id: 'feed', source: 'rss', label: 'Feed' },
+    run: async () => ({ runs: [{ source: 'rss', source_name: 'venue', status: 'ok', events, complete: true }] }),
+  });
+  await runAdapter(asFeed(['Feed Show'].map((t) => ({ ...show(t), source: 'rss' }))));
+  await wait();
+  await runAdapter(fakeAdapter('ABCDEF'.split('').map((t) => show(t)), { complete: true }));
+  assert.ok(titles().includes('Feed Show'));
+});

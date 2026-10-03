@@ -20,7 +20,7 @@ export const meta = { id: 'scraper', source: 'scrape', label: 'Web scrapers' };
 
 const NAV_TIMEOUT_MS = 30000;
 const WAITFOR_TIMEOUT_MS = 12000;
-const MAX_ITEMS = 250; // cap per page — a selector matching more than this is drifting
+const MAX_ITEMS = 400; // cap per page — a selector matching more than this is drifting
 const MAX_TITLE_LEN = 300; // longer "titles" are almost always scooped-up page copy
 const BLOCKED_RESOURCES = new Set(['image', 'media', 'font']);
 const MAX_PAGES = 20; // hard cap on pagination.maxPages
@@ -60,8 +60,9 @@ export function validateScraperConfig(cfg) {
 // them to the document so extractInPage sees every event, not just the first
 // screenful. `url` contains {offset} (start + i·step) or {page} (2, 3, …);
 // format "json-html" means the endpoint returns a JSON-encoded HTML string
-// (AEG/Carbonhouse venue sites), otherwise the body is HTML. Stops at the
-// first empty page.
+// (AEG/Carbonhouse venue sites), otherwise the body is HTML.
+// Returns { added, ended } — ended is 'end' only when the site ran out of
+// pages (an empty page); 'error' or 'max' mean the listing may be partial.
 export async function loadMorePages({ url, start = 0, step = 1, maxPages, format, itemSelector }) {
   let added = 0;
   for (let i = 0; i < maxPages; i += 1) {
@@ -69,25 +70,30 @@ export async function loadMorePages({ url, start = 0, step = 1, maxPages, format
       .replace('{offset}', String(start + i * step))
       .replace('{page}', String(i + 2));
     let html = '';
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 15000);
     try {
-      const res = await fetch(pageUrl, { credentials: 'same-origin' });
-      if (!res.ok) break;
+      const res = await fetch(pageUrl, { credentials: 'same-origin', signal: abort.signal });
+      if (!res.ok) return { added, ended: 'error' };
       html = await res.text();
       if (format === 'json-html') html = JSON.parse(html);
     } catch {
-      break;
+      return { added, ended: 'error' };
+    } finally {
+      clearTimeout(timer);
     }
-    if (typeof html !== 'string' || !html.trim()) break;
+    if (typeof html !== 'string' || !html.trim()) return { added, ended: 'end' };
     const holder = document.createElement('div');
     holder.setAttribute('data-eventlight-page', String(i + 2));
     holder.innerHTML = html;
-    const found = holder.querySelectorAll(itemSelector).length;
-    if (!found) break;
+    if (!holder.children.length) return { added, ended: 'end' };
+    // Keep paging even if this page has no matching items — the item selector
+    // may filter (e.g. by state), and a page of out-of-area shows isn't the end.
     document.body.appendChild(holder);
-    added += found;
+    added += holder.querySelectorAll(itemSelector).length;
     await new Promise((r) => setTimeout(r, 300)); // stay polite
   }
-  return added;
+  return { added, ended: 'max' };
 }
 
 // Runs in the browser context: pull raw fields per event item using the
@@ -203,8 +209,11 @@ async function runScraper(browser, cfg) {
       await page.waitForSelector(cfg.waitFor, { timeout: WAITFOR_TIMEOUT_MS }).catch(() => {});
     }
 
+    // A listing only counts as complete (safe to prune missing shows against)
+    // when every page loaded and nothing was cut off by the item cap.
+    let complete = true;
     if (cfg.pagination) {
-      await page.evaluate(loadMorePages, {
+      const paging = await page.evaluate(loadMorePages, {
         url: cfg.pagination.url,
         start: Number(cfg.pagination.start) || 0,
         step: Number(cfg.pagination.step) || 1,
@@ -212,6 +221,7 @@ async function runScraper(browser, cfg) {
         format: cfg.pagination.format || 'html',
         itemSelector: cfg.selectors.item,
       });
+      if (paging.ended !== 'end') complete = false;
     }
 
     const raw = await page.evaluate(extractInPage, {
@@ -219,6 +229,7 @@ async function runScraper(browser, cfg) {
       maxItems: MAX_ITEMS,
     });
 
+    if (raw.length >= MAX_ITEMS) complete = false;
     const events = raw.map((r) => mapScrapedItem(r, cfg, source_name)).filter(Boolean);
 
     if (raw.length === 0) {
@@ -234,7 +245,7 @@ async function runScraper(browser, cfg) {
       );
     }
 
-    return { source: 'scrape', source_name, status: 'ok', events, complete: true };
+    return { source: 'scrape', source_name, status: 'ok', events, complete };
   } catch (err) {
     return fail(`${cfg.url} — ${err.message}`);
   } finally {

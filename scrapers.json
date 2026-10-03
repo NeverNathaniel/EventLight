@@ -86,7 +86,7 @@
         "url": "https://www.showboxpresents.com/events/events_ajax/{offset}?category=0&venue=0&team=0&exclude=&per_page=20&came_from_page=event-list-page",
         "start": 20,
         "step": 20,
-        "maxPages": 12,
+        "maxPages": 15,
         "format": "json-html"
       }
     },

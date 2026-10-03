@@ -66,7 +66,7 @@ function ingestRun(run, startedAt) {
   if (run.status === 'ok' && run.events.length) {
     counts = upsertEvents(run.events);
     if (run.complete && run.events.length >= MIN_EVENTS_TO_PRUNE) {
-      pruned = pruneStaleEvents(run.source_name, startedAt, localToday());
+      pruned = pruneStaleEvents(run.source, run.source_name, startedAt, localToday());
     }
   } else if (!run.counts) {
     counts.found = run.events?.length || 0;

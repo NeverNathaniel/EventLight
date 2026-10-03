@@ -34,6 +34,8 @@ export function setFavoriteArtist(name, weight = 3, source = 'manual') {
 export function deleteFavoriteArtist(key) {
   db.prepare('DELETE FROM favorite_artists WHERE artist_key = ?').run(String(key || ''));
   db.prepare('DELETE FROM similar_artists WHERE seed_key = ?').run(String(key || ''));
+  // Forget the fetch too, so re-adding the artist refetches its list.
+  db.prepare('UPDATE artists SET similar_at = NULL WHERE artist_key = ?').run(String(key || ''));
 }
 
 // Headliners of events you starred — a learned, softer kind of favorite.

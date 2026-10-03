@@ -59,6 +59,7 @@ async function resolveArtist(name, budget, fresh) {
   if (budget.left <= 0) return getArtist(key) || null;
   budget.left -= 1;
   budget.lookups += 1;
+  const previous = getArtist(key);
   let row;
   try {
     const found = await withRetry(() => lookupArtist(name));
@@ -70,6 +71,17 @@ async function resolveArtist(name, budget, fresh) {
     budget.errors += 1;
     budget.lastError = err.response ? `MusicBrainz HTTP ${err.response.status}` : err.message;
     row = { key, name, status: 'error' };
+  }
+  // A failed re-check of an artist we already know shouldn't wipe its tags —
+  // keep the old data and just restart its freshness clock.
+  if (previous?.status === 'found' && row.status !== 'found') {
+    row = {
+      key,
+      name: previous.name,
+      mbid: previous.mbid,
+      tags: previous.tags ? previous.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+      status: 'found',
+    };
   }
   saveArtist(row);
   fresh.add(key);

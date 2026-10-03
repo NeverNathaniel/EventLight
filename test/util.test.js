@@ -122,6 +122,11 @@ test('classify: non-show nights at music venues are "other", not music', () => {
   assert.equal(classify('Ruby Mimosa Presents: BurlesKaraoke', 'music'), 'other');
 });
 
+test('classify: only the title decides "not a show", not a description', () => {
+  const text = 'ComedyEvent Jo Koy — comedian who starred in the film Easter Sunday';
+  assert.equal(classify(text, '', 'Jo Koy'), 'comedy');
+});
+
 test('clean: collapses whitespace', () => {
   assert.equal(clean('  The\n  Band \t Name '), 'The Band Name');
 });

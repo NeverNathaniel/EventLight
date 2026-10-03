@@ -214,7 +214,7 @@ Use **Settings → Web Scrapers → Add scraper**, or edit `scrapers.json`:
 - Dates without a year (`SAT JUL 4`) get the year inferred: this year, or next year once the date is more than ~45 days in the past. Formats like `Jul 4`, `July 4th, 2026`, `4 Jul 2026`, `7/4`, and `07/04/2026` all parse.
 - To debug selectors visually, set `HEADLESS=false` in `.env` and re-run the scraper from Settings.
 
-The scraper validates each config before spending a page load on it, blocks image/media/font downloads (faster and lighter on the venue's server), retries a failed navigation once, and caps extraction at 250 items per page so one bad selector can't flood the database. Trivia, movie, bingo, karaoke and drag nights at music venues are filed as _other_ rather than music.
+The scraper validates each config before spending a page load on it, blocks image/media/font downloads (faster and lighter on the venue's server), retries a failed navigation once, and caps extraction at 400 items per page so one bad selector can't flood the database. Trivia, movie, bingo, karaoke and drag nights at music venues are filed as _other_ rather than music.
 
 After a successful scrape, or a successful iCal / JSON-LD / VenuePilot feed run (sources that list a venue's whole calendar), upcoming listings that source no longer shows — cancelled or moved — are removed, unless you starred or hid them. RSS feeds and APIs are never pruned this way, since they only return a window of results.
 

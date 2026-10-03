@@ -158,7 +158,7 @@ function mapJsonLdEvent(node, baseUrl) {
     doors_time: toTime(node.doorTime),
     // No fallback here: an unclassified event stays null so the consumer
     // (e.g. a feed's configured category) can supply the default.
-    category: classify(`${typeText} ${title} ${node.description || ''}`, '') || null,
+    category: classify(`${typeText} ${title} ${node.description || ''}`, '', title) || null,
     genre_tags: [],
     ticket_url: ticketUrl ? absoluteUrl(ticketUrl, baseUrl) : null,
     image_url: image ? absoluteUrl(typeof image === 'string' ? image : image.url, baseUrl) : null,
