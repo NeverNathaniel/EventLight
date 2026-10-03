@@ -94,3 +94,38 @@ test('a feed and a scraper sharing an id never prune each other', async () => {
   await runAdapter(fakeAdapter('ABCDEF'.split('').map((t) => show(t)), { complete: true }));
   assert.ok(titles().includes('Feed Show'));
 });
+
+test('a show listed by a venue and by Ticketmaster is listed once', async () => {
+  const { upsertEvent, queryEvents, countEvents } = await import('../src/db/queries.js');
+  const day = '2099-07-04';
+  const base = { date: day, category: 'music', city: 'Seattle' };
+  upsertEvent({ ...base, source: 'scrape', source_name: 'tractor', title: 'Tractor Presents: Dave Hause w/ American Steel', venue: 'The Tractor Tavern' });
+  upsertEvent({ ...base, source: 'api', source_name: 'ticketmaster', title: 'Dave Hause (21+)', venue: 'Tractor', lineup: ['Dave Hause', 'American Steel'] });
+  // Same source twice is two shows (matinee + evening).
+  upsertEvent({ ...base, source: 'api', source_name: 'ticketmaster', title: 'Choir - Matinee', venue: 'Hall', lineup: ['Choir'], time: '14:00' });
+  upsertEvent({ ...base, source: 'api', source_name: 'ticketmaster', title: 'Choir - Evening', venue: 'Hall', lineup: ['Choir'], time: '19:30' });
+  // No parsed act: two venues' open mics are not one show.
+  upsertEvent({ ...base, source: 'scrape', source_name: 'a', title: 'Open Mic', venue: 'Bar A' });
+  upsertEvent({ ...base, source: 'rss', source_name: 'b', title: 'Open Mic', venue: 'Bar B' });
+  // Same act, same night, other city: not the same show.
+  upsertEvent({ ...base, source: 'rss', source_name: 'c', title: 'Dave Hause', venue: 'Elsewhere', city: 'Spokane' });
+
+  const listed = () => queryEvents({ dateFrom: day, dateTo: day }).map((e) => `${e.source_name}: ${e.title}`).sort();
+  assert.deepEqual(listed(), [
+    'a: Open Mic',
+    'b: Open Mic',
+    'c: Dave Hause',
+    'ticketmaster: Choir - Evening',
+    'ticketmaster: Choir - Matinee',
+    'tractor: Tractor Presents: Dave Hause w/ American Steel',
+  ]);
+  assert.equal(countEvents({ dateFrom: day, dateTo: day }), 6);
+  assert.equal(countEvents({ dateFrom: day, dateTo: day, showDuplicates: true }), 7);
+  // Filtering by source still shows that source's copy.
+  assert.ok(queryEvents({ dateFrom: day, dateTo: day, sources: ['ticketmaster'] }).some((e) => e.title === 'Dave Hause (21+)'));
+  // The copy you starred wins.
+  const tmCopy = db.prepare("SELECT id FROM events WHERE title = 'Dave Hause (21+)'").get();
+  setInterested(tmCopy.id, true);
+  assert.ok(listed().includes('ticketmaster: Dave Hause (21+)'));
+  assert.ok(!listed().some((t) => t.startsWith('tractor:')));
+});

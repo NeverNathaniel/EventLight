@@ -150,7 +150,7 @@ The free tier allows 5,000 calls a day at 5 per second; a full refresh uses abou
 
 ## Data sources
 
-Each source is an adapter in `src/adapters/`. The scheduler runs them all every 6 hours, merging results into one `events` table and **deduplicating by title + date + venue**.
+Each source is an adapter in `src/adapters/`. The scheduler runs them all every 6 hours, merging results into one `events` table and **deduplicating by title + date + venue**. A show that two sources list under different titles or venue names, such as a venue's own calendar and Ticketmaster, is still listed once: same headliner, same date, same city. The copy you starred wins; otherwise the venue's own listing is kept.
 
 | Type | Sources |
 | --- | --- |

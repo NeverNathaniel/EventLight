@@ -1,7 +1,7 @@
 // Prepared statements and higher-level query helpers.
 import db from './index.js';
 import { safeHttpUrl } from '../adapters/util.js';
-import { parseLineup } from '../lineup.js';
+import { parseLineup, artistKey } from '../lineup.js';
 import { HOME_CITY, HOME_BOOST } from '../config.js';
 
 // ── Normalisation / dedupe ──────────────────────────────────────────────
@@ -27,11 +27,11 @@ const insertEvent = db.prepare(`
   INSERT INTO events
     (dedupe_key, source, source_name, title, artist, venue, city, date, time,
      doors_time, category, genre_tags, ticket_url, image_url, price_range, lineup,
-     interested, hidden, created_at, updated_at)
+     headliner_key, interested, hidden, created_at, updated_at)
   VALUES
     (@dedupe_key, @source, @source_name, @title, @artist, @venue, @city, @date, @time,
      @doors_time, @category, @genre_tags, @ticket_url, @image_url, @price_range, @lineup,
-     @interested, @hidden, datetime('now'), datetime('now'))
+     @headliner_key, @interested, @hidden, datetime('now'), datetime('now'))
 `);
 
 // Re-ingestion refreshes mutable fields but preserves user state (interested/hidden).
@@ -41,9 +41,16 @@ const updateEvent = db.prepare(`
     venue = @venue, city = @city, date = @date, time = @time, doors_time = @doors_time,
     category = @category, genre_tags = @genre_tags, ticket_url = @ticket_url,
     image_url = @image_url, price_range = @price_range, lineup = @lineup,
-    updated_at = datetime('now')
+    headliner_key = @headliner_key, updated_at = datetime('now')
   WHERE dedupe_key = @dedupe_key
 `);
+
+// Identifies a show across sources: the same headliner on the same date.
+// Events with no parsed act (trivia, open mics) get none, so two venues'
+// "Open Mic" nights never count as one show.
+export function headlinerKey(lineup) {
+  return (lineup[0] && artistKey(lineup[0])) || null;
+}
 
 // Normalise a raw adapter event into a complete row, returning null if invalid.
 function normalizeEvent(raw) {
@@ -81,6 +88,7 @@ function normalizeEvent(raw) {
     image_url: safeHttpUrl(raw.image_url),
     price_range: raw.price_range || null,
     lineup: JSON.stringify(lineup),
+    headliner_key: headlinerKey(lineup),
     interested: 0,
     hidden: 0,
   };
@@ -167,6 +175,21 @@ function buildWhere(filters = {}) {
   }
   if (filters.onlyInterested) {
     clauses.push('interested = 1');
+  }
+  // The same show listed by two sources (a venue's calendar and Ticketmaster,
+  // under slightly different titles and venue names) is listed once. The
+  // copy you starred wins, then the venue's own listing over an API's, then
+  // the older row. Same-source twins (matinee + evening) are separate shows.
+  // Skipped when filtering by source, so each source still shows everything.
+  if (!filters.showDuplicates && !(Array.isArray(filters.sources) && filters.sources.length)) {
+    clauses.push(`NOT EXISTS (
+      SELECT 1 FROM events t
+      WHERE t.date = events.date AND t.headliner_key = events.headliner_key
+        AND t.source_name != events.source_name
+        AND (t.city IS NULL OR events.city IS NULL OR t.city = events.city)
+        AND (t.interested > events.interested
+          OR (t.interested = events.interested AND (t.source = 'api') < (events.source = 'api'))
+          OR (t.interested = events.interested AND (t.source = 'api') = (events.source = 'api') AND t.id < events.id)))`);
   }
   if (filters.search) {
     clauses.push('(title LIKE @search OR artist LIKE @search OR venue LIKE @search)');

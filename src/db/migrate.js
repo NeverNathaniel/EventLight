@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import db from './index.js';
 import { applyTasteProfile } from './applyTasteProfile.js';
 import { parseLineup } from '../lineup.js';
+import { headlinerKey } from './queries.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,6 +13,7 @@ export function migrate() {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(schema);
   backfillLineups();
+  backfillHeadlinerKeys();
   seedDefaults();
   // One-off Spotify taste import (idempotent; no-op once applied).
   applyTasteProfile();
@@ -27,6 +29,21 @@ function backfillLineups() {
     for (const r of rows) {
       const lineup = parseLineup(r.title, { artist: r.artist });
       if (lineup.length) update.run(JSON.stringify(lineup), r.id);
+    }
+  })();
+}
+
+// Events stored before cross-source matching existed get their headliner key.
+function backfillHeadlinerKeys() {
+  const rows = db.prepare("SELECT id, lineup FROM events WHERE headliner_key IS NULL AND lineup != '[]'").all();
+  if (!rows.length) return;
+  const update = db.prepare('UPDATE events SET headliner_key = ? WHERE id = ?');
+  db.transaction(() => {
+    for (const r of rows) {
+      let lineup = [];
+      try { lineup = JSON.parse(r.lineup); } catch { /* leave it unmatched */ }
+      const key = Array.isArray(lineup) ? headlinerKey(lineup) : null;
+      if (key) update.run(key, r.id);
     }
   })();
 }
