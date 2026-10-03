@@ -62,6 +62,18 @@ test('parseLineup: API artist leads, support text is appended', () => {
   assert.deepEqual(parseLineup('PUP - Morbid Stuff Tour', { artist: 'PUP' }), ['PUP']);
 });
 
+test('parseLineup: pipe-separated bills (New Frontier Lounge)', () => {
+  // A name ending in "!" right before a separator is still one split.
+  assert.deepEqual(parseLineup('LANDROID | BATNAP! | MECHANICAL PLAGUE'), ['LANDROID', 'BATNAP', 'MECHANICAL PLAGUE']);
+  // A dash between numbers is part of the name.
+  assert.deepEqual(parseLineup('CORPSE DUST | 9 - 5 HYPERFUCK | 2LIBRAS'), ['CORPSE DUST', '9 - 5 HYPERFUCK', '2LIBRAS']);
+  // Door info in the support line isn't an act.
+  assert.deepEqual(
+    parseLineup('CASI | BLACK ENDS', { support: 'Suggested $10 donations at the door supporting 253 Harm Redux' }),
+    ['CASI', 'BLACK ENDS']
+  );
+});
+
 test('artistKey: case, punctuation, diacritics and a leading "The" are ignored', () => {
   assert.equal(artistKey('The Menzingers'), artistKey('MENZINGERS'));
   assert.equal(artistKey('alt-J'), artistKey('ALT-J'));

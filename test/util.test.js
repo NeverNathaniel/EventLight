@@ -129,6 +129,7 @@ test('classify: non-show nights at music venues are "other", not music', () => {
   assert.equal(classify('Tacoma’s Chinese Expulsion of 1885 Presented by Ryan Dearinger History Pub', 'music'), 'other');
   assert.equal(classify('2nd Annual Elks Holiday Brewfest', 'music'), 'other');
   assert.equal(classify('Grit City After Dark: An Evening of True Crime Tales', 'music'), 'other');
+  assert.equal(classify('QUEERAROKE w/ OBEY LYPSO', 'music'), 'other');
 });
 
 test('classify: only the title decides "not a show", not a description', () => {

@@ -81,6 +81,18 @@
       "category": "music",
       "enabled": true,
       "note": "Tacoma's nonprofit all-ages venue (punk, hardcore, indie). Its Squarespace site embeds a VenuePilot widget — read from VenuePilot's public events API. Verified 2026-10 (15 events)."
+    },
+    {
+      "id": "new-frontier-lounge",
+      "name": "New Frontier Lounge",
+      "url": "https://www.newfrontierlounge.com/calendar",
+      "type": "venuepilot",
+      "accountId": 3590,
+      "city": "Tacoma",
+      "venue": "New Frontier Lounge",
+      "category": "music",
+      "enabled": true,
+      "note": "Hilltop dive with punk, indie and experimental bills (plus trivia/karaoke nights, filed as 'other'). Moved to newfrontierlounge.com; its calendar page embeds a VenuePilot widget. Verified 2026-10 (24 events)."
     }
   ]
 }

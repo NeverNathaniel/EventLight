@@ -36,7 +36,7 @@ const SUBTITLE_RE =
 
 // Segments that are events, not acts. Dropped from the lineup entirely.
 const NON_ARTIST_RE =
-  /\b(?:open mic|trivia|karaoke|bingo|brunch|movie night|screening|showcase|square dance|presents?|tickets?|benefit|fundraiser|tba|tbd|special guests?|guests|and more|dj set|donation|doors|tour)\b|\b(?:show|bash|fest|festival)$/i;
+  /\b(?:open mic|trivia|karaoke|bingo|brunch|movie night|screening|showcase|square dance|presents?|tickets?|benefit|fundraiser|tba|tbd|special guests?|guests|and more|dj set|donations?|doors|tour)\b|\b(?:show|bash|fest|festival)$|\$\d/i;
 
 // Dates and times that leak into titles ("Sat July 11, 7pm", "Friday July 10th").
 const DATE_TIME_RE =
@@ -55,10 +55,12 @@ const SUPPORT_SPLIT_ALL_RE = new RegExp(`(?:^|\\s+)${SUPPORT_WORDS}\\s*`, 'gi');
 
 // Co-headliner separators: "A x B", "A + B", "A • B", "A // B", "A / B", "A | B",
 // and the exclamation marks scraped titles love ("Square Dance! Band Name").
-const COBILL_SPLIT_RE = /\s+(?:x|×|\+|•|·|\|)\s+|\s*\/\/+\s*|\s*\/\s+|\s+\/\s*|\s*;\s*|!+\s+/i;
+// A name ending in "!" before a separator ("TACOS! | ATUMES") is one split.
+const COBILL_SPLIT_RE = /!*\s+(?:x|×|\+|•|·|\|)\s+|\s*\/\/+\s*|\s*\/\s+|\s+\/\s*|\s*;\s*|!+\s+/i;
 
-// Dashes between segments (but not inside "alt-J" or "Sea-Tac").
-const DASH_SPLIT_RE = /\s*[–—]\s*|\s+-\s*|\s*-\s+/;
+// Dashes between segments (but not inside "alt-J" or "Sea-Tac", or between
+// numbers: "9 - 5 Hyperfuck" is one band).
+const DASH_SPLIT_RE = /\s*[–—]\s*|(?<!\d)\s+-\s*|\s*-\s+(?!\d)/;
 
 // "X Presents:", "KEXP Presents!", "Tractor & Heirophant Present:" at the start.
 const PRESENTS_PREFIX_RE = /^.{0,60}?\bpresents?\b\s*[:!\-–—]?\s*/i;
@@ -149,8 +151,9 @@ export function parseLineup(title, { artist, support } = {}) {
     .flatMap((s) => s.split(COBILL_SPLIT_RE))
     .flatMap(splitHeadCommas)
     .flatMap(splitDashes);
-  // A separate support line is sometimes a tour name instead ("Of Earth & Wires Tour").
-  const supportLine = /\b(?:tour|anniversary|album|release)\b/i.test(support || '') ? '' : support;
+  // A separate support line is sometimes a tour name ("Of Earth & Wires Tour")
+  // or door info ("Suggested $10 donations at the door") instead.
+  const supportLine = /\b(?:tour|anniversary|album|release|donations?)\b|\$\d/i.test(support || '') ? '' : support;
   const supportText = [tail, String(supportLine || '').replace(/^\s*(?:with|w\/|feat\.?|featuring|special guests?:?)\s+/i, '')]
     .filter(Boolean)
     .join(', ');

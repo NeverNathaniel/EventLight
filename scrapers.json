@@ -174,7 +174,7 @@
       "venue": "The New Frontier Lounge",
       "category": "music",
       "enabled": false,
-      "note": "DO NOT ENABLE: thenewfrontierlounge.com has expired and now serves an unrelated spam site (checked 2026-07). Re-point the url if the venue returns with a new website."
+      "note": "Superseded by the 'new-frontier-lounge' VenuePilot feed in feeds.json: the venue moved to newfrontierlounge.com (the old thenewfrontierlounge.com domain now serves spam)."
     },
     {
       "id": "full-tilt-georgetown",
@@ -424,7 +424,7 @@
       "venue": "Alma Mater",
       "category": "music",
       "enabled": false,
-      "note": "Site returns 403 to automated requests on /events, and the homepage event widget showed stale 2021 entries at verification (2026-07). Verify in a real browser before enabling."
+      "note": "DO NOT ENABLE: Alma Mater closed in October 2023; the site is a frozen copy with 2021 events (checked 2026-10)."
     },
     {
       "id": "mcmenamins-elks-temple",

@@ -17,7 +17,7 @@ const MUSIC_HINTS = [
 // Venue nights that aren't shows at all — trivia, movie nights, bingo… Music
 // venues list these alongside concerts, and they shouldn't count as music.
 const NOT_A_SHOW_RE =
-  /\b(?:trivia|bingo|karaoke|burles\w*|drag (?:show|brunch|bingo|night|queen)|drag and|movie night|movie|film|screening|craft|market|yoga|workshop|storytime|paint night|brewfest|beer fest|true crime|lecture|author talk|history pub)\b|karaoke/i;
+  /\b(?:trivia|bingo|karaoke|burles\w*|drag (?:show|brunch|bingo|night|queen)|drag and|movie night|movie|film|screening|craft|market|yoga|workshop|storytime|paint night|brewfest|beer fest|true crime|lecture|author talk|history pub)\b|karaoke|queeraroke/i;
 
 // Best-effort category from arbitrary text (title, classification, etc.).
 // The not-a-show check reads only the title — a comedian's bio mentioning
