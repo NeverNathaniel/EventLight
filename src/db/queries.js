@@ -2,6 +2,7 @@
 import db from './index.js';
 import { safeHttpUrl } from '../adapters/util.js';
 import { parseLineup } from '../lineup.js';
+import { HOME_CITY, HOME_BOOST } from '../config.js';
 
 // ── Normalisation / dedupe ──────────────────────────────────────────────
 function norm(s) {
@@ -354,4 +355,14 @@ export function setSetting(key, value) {
     `INSERT INTO settings (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
   ).run(key, String(value));
+}
+
+// "Close to home": your home city and how much nearby shows are boosted (a
+// percentage). Saved in Settings; the .env values are only defaults.
+export function getHomeSetting() {
+  const boost = parseInt(getSetting('home_boost', ''), 10);
+  return {
+    city: getSetting('home_city', HOME_CITY) || '',
+    boost: Number.isFinite(boost) ? Math.max(0, Math.min(100, boost)) : HOME_BOOST,
+  };
 }

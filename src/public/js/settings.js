@@ -4,6 +4,7 @@ function settings() {
     data: {
       apiKeys: { ticketmaster: false, bandsintown: false, eventbrite: false },
       headless: true, cron: '', genres: [], artists: [], enrichment: null, preferences: [], tasteProfile: null, feeds: [], scrapers: [],
+      home: { city: '', boost: 0, levels: [], cities: [] },
     },
     status: { sources: [] },
     keys: { ticketmaster: '', bandsintown: '', eventbrite: '' },
@@ -67,6 +68,14 @@ function settings() {
     },
     async loadStatus() {
       try { this.status = await getJSON('/api/status'); } catch { /* non-fatal */ }
+    },
+
+    // ── Close to home ──────────────────────────────────────────────────────
+    async saveHome(change) {
+      const r = await postJSON('/api/settings/home', change);
+      if (r.error || !r.home) { this.flash(r.error || 'Could not save.'); return; }
+      this.data.home = { ...this.data.home, ...r.home };
+      this.flash(r.home.boost ? `Shows near ${r.home.city} get +${r.home.boost}%.` : 'Close-to-home boost is off.');
     },
 
     // ── API keys ───────────────────────────────────────────────────────────

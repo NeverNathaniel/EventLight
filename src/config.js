@@ -41,6 +41,11 @@ export const LOCATIONS = [
 
 export const SEARCH_RADIUS_MILES = 30;
 
+// "Close to home": shows you'd like anyway rank higher the nearer they are to
+// your home city. These are defaults — Settings → Close to Home overrides them.
+export const HOME_CITY = process.env.HOME_CITY ?? 'Tacoma';
+export const HOME_BOOST = Math.max(0, Math.min(100, parseInt(process.env.HOME_BOOST ?? '50', 10) || 0));
+
 // Polite delay (ms) applied between outbound requests within an adapter to
 // respect rate limits.
 export const REQUEST_DELAY_MS = parseInt(process.env.REQUEST_DELAY_MS || '350', 10);

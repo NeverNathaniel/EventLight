@@ -508,7 +508,8 @@ input[type='search'] { min-width: 180px; }
 .why-learned {
   color: var(--accent);
 }
-.why-similar {
+.why-similar,
+.why-nearby {
   color: var(--text);
 }
 .why-penalty {
@@ -884,6 +885,7 @@ input[type='search'] { min-width: 180px; }
   font-family: var(--font-mono);
 }
 .weight-pills button.on { background: var(--accent); color: #1a1206; border-color: var(--accent); }
+.weight-pills.wide button { width: auto; padding: 0 9px; font-size: 0.72rem; }
 .badge {
   font-family: var(--font-mono);
   font-size: 0.62rem;

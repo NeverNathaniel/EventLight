@@ -9,7 +9,11 @@ import {
   queryEvents,
   getPreferences,
   getSetting,
+  setSetting,
+  getHomeSetting,
+  getDistinctCities,
 } from '../db/queries.js';
+import { BOOST_LEVELS, knownCities, cityKey } from '../scoring/home.js';
 import { readFeeds, writeFeeds, readScrapers, writeScrapers } from '../configFiles.js';
 import { readTasteProfile } from '../db/applyTasteProfile.js';
 import {
@@ -36,6 +40,16 @@ function tasteProfileInfo() {
   };
 }
 
+// Cities to offer as "home": every city with listings plus every city the
+// distance table knows, one entry per city.
+function homeCityChoices() {
+  const byKey = new Map();
+  for (const c of [...getDistinctCities(), ...knownCities()]) {
+    if (!byKey.has(cityKey(c))) byKey.set(cityKey(c), c);
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+}
+
 const router = express.Router();
 
 // ── Overview ──────────────────────────────────────────────────────────────
@@ -54,6 +68,7 @@ router.get('/settings', (req, res) => {
     artists: getFavoriteArtists(),
     enrichment: { artists: countEnrichedArtists(), similar: countSimilarArtists() },
     preferences: getPreferences(),
+    home: { ...getHomeSetting(), levels: BOOST_LEVELS, cities: homeCityChoices() },
     tasteProfile: tasteProfileInfo(),
     feeds: readFeeds(),
     scrapers: readScrapers(),
@@ -72,6 +87,22 @@ router.post('/settings/keys', (req, res) => {
   }
   updateEnv(updates);
   res.json({ ok: true });
+});
+
+// ── Close to home ──────────────────────────────────────────────────────────
+router.post('/settings/home', (req, res) => {
+  const { city, boost } = req.body || {};
+  if (city !== undefined) {
+    const name = String(city).trim();
+    if (name.length > 60) return res.status(400).json({ error: 'City name too long' });
+    setSetting('home_city', name);
+  }
+  if (boost !== undefined) {
+    const level = BOOST_LEVELS.find((l) => l.value === Number(boost));
+    if (!level) return res.status(400).json({ error: 'Unknown boost level' });
+    setSetting('home_boost', level.value);
+  }
+  res.json({ home: getHomeSetting() });
 });
 
 // ── Manual genre weights ───────────────────────────────────────────────────

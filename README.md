@@ -130,6 +130,7 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 | `REFRESH_CRON` | Cron expression for scheduled ingestion (default `0 */6 * * *` — every 6 hours) |
 | `REFRESH_ON_START` | `true` to run a full ingestion when the server boots |
 | `ENRICH_ARTISTS` | `true` (default) to look up artist genres and similar artists after each refresh; `false` to skip |
+| `HOME_CITY` / `HOME_BOOST` | Defaults for **Close to Home**: your home city (default `Tacoma`) and the boost for shows near it, in percent (`0`, `25`, `50` or `100`; default `50`). Settings overrides both |
 | `ENRICH_MAX_LOOKUPS` | API calls the enrichment step may spend per refresh (default `150`, ~1/sec) — results are cached, so later refreshes only look up new artists |
 
 > API keys are **never** hardcoded — they're read from `.env` exclusively. The Settings page reports only whether each key is configured, never its value.
@@ -255,6 +256,7 @@ Scores are computed at query time and used for **Top Picks** and the **relevance
 | **Genre weights** | Your genre weights (1–5) vs. the event's tags — the source's own plus genres looked up for the lineup. Matching is whole-word and one-way: a `punk` weight matches `pop punk`, but `indie rock` doesn't match plain `rock`. Best match + ½·second + ¼·third, so a pile of loose tags can't beat a square fit. | up to ~8.75 |
 | **Learned tags** | Genre tags from events you star, fading with an 8-week half-life. | up to 4 |
 | **Penalties** | Another show by a headliner you've hidden (−6); tribute acts (−3). | |
+| **Close to home** | Scales the total up for shows near your home city (Settings → Close to Home): full within ~8 miles, fading to nothing by 18. Seattle is 25 miles from Tacoma, so it gets nothing. Only a positive score is scaled, so being nearby never makes a pick on its own. | ×1.25 / ×1.5 / ×2 (default ×1.5, home city Tacoma) |
 
 **Lineups.** Scraped listings are just titles — _"Tractor Presents: Bob Sumner w/ Laith & The Texas Birds, Birdie Fenn Cent @ The Sunset Tavern"_ — so every event's bill is parsed out of its title (`src/lineup.js`): promoter prefixes, tour names, venue suffixes, "SOLD OUT!" and similar noise are stripped, and `w/`, `x`, `•`, `//` and friends split the acts. Sources with structured data (Ticketmaster attractions, VenuePilot, Bandsintown) supply the lineup directly.
 
@@ -332,7 +334,7 @@ src/
   db/              SQLite setup, schema, migrations, query helpers
   routes/          Express handlers (events, settings, refresh, status, discover)
   scheduler/       node-cron job + manual triggers
-  scoring/         preference engine
+  scoring/         preference engine + close-to-home distances
   enrich/          artist genres (MusicBrainz) + similar artists (ListenBrainz)
   cinema/          movie listings (The Grand Cinema via Indy Systems), Wikidata facts, kids/action filter
   lineup.js        parse the bill (headliner, support) out of an event title
@@ -373,6 +375,7 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `eventbrite`, `bandsintown`, `rss`, `scraper`), the `cinema` listings, or the `enrich` step |
 | `POST` | `/api/settings/artists` | Add or re-weight a favorite artist (`{ name, weight }`) |
 | `DELETE` | `/api/settings/artists/:key` | Remove a favorite artist |
+| `POST` | `/api/settings/home` | Set the close-to-home city and boost (`{ city, boost }`, boost one of `0`, `25`, `50`, `100`) |
 | `POST` | `/api/discover` | Probe a venue URL for RSS/iCal/JSON-LD, falling back to a scraper template |
 | `POST` | `/api/discover/add` | Save a discovered source to `feeds.json` / `scrapers.json` |
 | `GET` | `/api/export/ics` | Download interested events as `.ics` |

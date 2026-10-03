@@ -9,6 +9,10 @@
 //   learned tags     decayed signals from events you marked Interested       0–4
 //   penalties        headliner you hid before (−6), tribute act (−3)
 //
+// The total is then scaled up for shows near your home city (Settings →
+// Close to Home: up to +100%, full within 8 mi, none past 18 mi). Only a
+// positive total is scaled, so being nearby never makes a pick by itself.
+//
 // Every part that fires adds a human-readable reason, so the UI can say *why*
 // something is a pick ("PUP is a favorite", "Joyce Manor sounds like PUP").
 //
@@ -17,7 +21,7 @@
 // tagged plain "rock". Matched weights are combined with diminishing returns
 // (best + ½·second + ¼·third), so a show with many loosely-related tags can't
 // outscore one that squarely fits.
-import { getManualGenres, getPreferences } from '../db/queries.js';
+import { getManualGenres, getPreferences, getHomeSetting } from '../db/queries.js';
 import {
   getFavoriteArtists,
   getLearnedArtists,
@@ -27,6 +31,7 @@ import {
   parseLineupColumn,
 } from '../db/artists.js';
 import { artistKey, lineupKeys, isTribute } from '../lineup.js';
+import { proximity } from './home.js';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const SIGNAL_HALF_LIFE_WEEKS = 8;
@@ -206,7 +211,7 @@ export function buildContext(now = Date.now()) {
     .map((p) => ({ tag: normTag(p.tag), decayed: decayedSignal(p, now) }))
     .filter((p) => p.tag && !GENERIC_TAGS.has(p.tag) && p.decayed > 0.05);
 
-  return { manualGenres, favorites, learned, similar, hidden, prefs };
+  return { manualGenres, favorites, learned, similar, hidden, prefs, home: getHomeSetting() };
 }
 
 function eventLineup(event) {
@@ -341,7 +346,21 @@ export function scoreEvent(event, ctx) {
   }
 
   const boost = artistScore + behavioral;
-  const score = Math.round((base + boost + penalty) * 100) / 100;
+  let total = base + boost + penalty;
+
+  // ── Close to home ─────────────────────────────────────────────────────
+  // Scales a show you'd like anyway; it never lifts a show with no match.
+  if (total > 0 && ctx.home?.boost > 0) {
+    const near = proximity(event.city, ctx.home.city);
+    if (near.factor > 0) {
+      total *= 1 + (ctx.home.boost / 100) * near.factor;
+      reasons.push({
+        kind: 'nearby',
+        text: near.miles == null ? `Close to home (${event.city})` : `Close to home (${event.city}, ${near.miles} mi)`,
+      });
+    }
+  }
+  const score = Math.round(total * 100) / 100;
   const tags = [...new Set([...sourceTags, ...artistTags])];
   return { score, base, boost, matched: genreHits.map((h) => h.genre), reasons, tags, lineup };
 }

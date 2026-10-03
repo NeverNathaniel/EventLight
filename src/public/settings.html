@@ -142,6 +142,26 @@
       </div>
     </section>
 
+    <!-- CLOSE TO HOME -->
+    <section class="settings-section">
+      <h2>Close to Home</h2>
+      <p class="desc">Shows you'd like anyway rank higher the closer they are to home: the full boost within about 8 miles, fading to none by 18. It only scales a show's existing score, so a nearby show with no match to your taste stays out of Top Picks.</p>
+      <div class="row">
+        <div class="grow"><div class="name">Home city</div><div class="sub">Shows near it say “Close to home” on their cards</div></div>
+        <select x-model="data.home.city" @change="saveHome({ city: data.home.city })">
+          <template x-for="c in data.home.cities" :key="c"><option :value="c" x-text="c" :selected="c === data.home.city"></option></template>
+        </select>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Boost</div><div class="sub" x-text="data.home.boost ? '+' + data.home.boost + '% for shows near home' : 'off'"></div></div>
+        <div class="weight-pills wide">
+          <template x-for="l in data.home.levels" :key="l.value">
+            <button :class="{ on: data.home.boost === l.value }" @click="saveHome({ boost: l.value })" x-text="l.label"></button>
+          </template>
+        </div>
+      </div>
+    </section>
+
     <!-- LEARNED SIGNALS -->
     <section class="settings-section">
       <h2>Learned Signals</h2>

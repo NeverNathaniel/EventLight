@@ -508,7 +508,7 @@ function dashboard() {
 }
 
 // ── module-level helpers ───────────────────────────────────────────────────
-const WHY_ICON = { favorite: '♥', learned: '★', similar: '≈', 'learned-tags': '↺', penalty: '↓' };
+const WHY_ICON = { favorite: '♥', learned: '★', similar: '≈', 'learned-tags': '↺', nearby: '⌂', penalty: '↓' };
 
 function blankForm() {
   return {
