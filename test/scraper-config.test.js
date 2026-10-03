@@ -1,7 +1,7 @@
 // Tests for scraper config validation (run before any page load is spent).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateScraperConfig, mapScrapedItem } from '../src/adapters/scraper.js';
+import { validateScraperConfig, mapScrapedItem, venueFromTitle } from '../src/adapters/scraper.js';
 
 const valid = {
   url: 'https://venue.example/calendar',
@@ -57,4 +57,18 @@ test('mapScrapedItem: per-item venue, support line, separate time', () => {
   // Rooms outside the area are skipped; items without a venue use the config's.
   assert.equal(mapScrapedItem({ ...item, venue: '@ Numerica Veterans Arena' }, cfg), null);
   assert.equal(mapScrapedItem({ ...item, venue: '' }, cfg).venue, 'The Showbox');
+});
+
+test('titleVenues: a promoter\'s show at another room gets that venue', () => {
+  const cfg = { id: 'tractor', url: 'https://tractortavern.com/calendar/', venue: 'The Tractor Tavern', titleVenues: { 'the sunset': 'Sunset Tavern' } };
+  const item = (name) => ({ name, date: 'Sat, Oct 3, 2026', link: '', image: '', price: '', venue: '', support: '', time: '' });
+  assert.equal(mapScrapedItem(item('Tractor Presents: Dave Hause x American Steel AT The Sunset'), cfg).venue, 'Sunset Tavern');
+  assert.equal(mapScrapedItem(item('Tractor Presents: Bob Sumner w/ Laith @ The Sunset Tav'), cfg).venue, 'Sunset Tavern');
+  assert.equal(mapScrapedItem(item('Tractor Presents: Abby Webster w/ Alex Dunn'), cfg).venue, 'The Tractor Tavern');
+  // Only after "at" / "@", and whole words.
+  assert.equal(venueFromTitle('The Sunset Sessions', cfg.titleVenues), null);
+  assert.equal(venueFromTitle('Live at the Sunsetter Lounge', cfg.titleVenues), null);
+  assert.equal(validateScraperConfig({ ...valid, titleVenues: { 'the sunset': '' } }) !== null, true);
+  assert.equal(validateScraperConfig({ ...valid, titleVenues: ['x'] }) !== null, true);
+  assert.equal(validateScraperConfig({ ...valid, titleVenues: { 'the sunset': 'Sunset Tavern' } }), null);
 });

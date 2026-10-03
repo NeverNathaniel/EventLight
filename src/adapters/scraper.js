@@ -53,6 +53,24 @@ export function validateScraperConfig(cfg) {
       return `Invalid pagination.url "${p.url}"`;
     }
   }
+  if (cfg.titleVenues != null) {
+    const tv = cfg.titleVenues;
+    if (typeof tv !== 'object' || Array.isArray(tv) || Object.values(tv).some((v) => typeof v !== 'string' || !v.trim())) {
+      return 'titleVenues must map a phrase to a venue name, e.g. { "the sunset": "Sunset Tavern" }';
+    }
+  }
+  return null;
+}
+
+// Promoters list shows at other rooms on their own calendar and name the room
+// in the title ("Tractor Presents: … AT The Sunset"). `titleVenues` maps
+// those names ("the sunset") to the real venue; matched after "at" or "@".
+export function venueFromTitle(title, titleVenues) {
+  for (const [phrase, venue] of Object.entries(titleVenues || {})) {
+    const words = String(phrase).trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (!words[0]) continue;
+    if (new RegExp(`(?:^|\\s)(?:at|@)\\s+${words.join('\\s+')}(?!\\w)`, 'i').test(title)) return venue.trim();
+  }
   return null;
 }
 
@@ -155,7 +173,7 @@ export function mapScrapedItem(r, cfg, source_name = cfg.id || cfg.name) {
   // Multi-venue listings (the Showbox sells Climate Pledge, WAMU, …) name the
   // room per item; `skipVenues` drops rooms outside your area.
   const itemVenue = clean(r.venue).replace(/^@\s*/, '');
-  const venue = itemVenue || cfg.venue || cfg.name;
+  const venue = itemVenue || venueFromTitle(title, cfg.titleVenues) || cfg.venue || cfg.name;
   const skip = (cfg.skipVenues || []).some((v) => venue.toLowerCase().includes(String(v).toLowerCase()));
   if (skip) return null;
   return {

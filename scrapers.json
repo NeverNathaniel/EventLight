@@ -8,8 +8,11 @@
       "venue": "The Tractor Tavern",
       "category": "music",
       "enabled": true,
-      "note": "TicketWeb 'flexmedia' widget, server-rendered. Selectors verified against the live page 2026-07.",
+      "note": "TicketWeb 'flexmedia' widget, server-rendered. Selectors verified against the live page 2026-07. Tractor also books shows at the Sunset Tavern and lists them here as '… AT The Sunset'; titleVenues labels those with the right venue.",
       "waitFor": ".flexmedia--artistevents",
+      "titleVenues": {
+        "the sunset": "Sunset Tavern"
+      },
       "selectors": {
         "item": ".flexmedia--artistevents",
         "name": ".artisteventsname",
