@@ -1,8 +1,11 @@
-// One-off taste-profile import (derived from Spotify; see taste-profile.json).
-// Applied idempotently on startup: genres become Layer-1 manual weights and
-// artists become favorite artists (which never decay, unlike behavioral
-// signals). Guarded by settings keyed to generated_at, so it runs once —
-// bump generated_at in the JSON to re-import.
+// Taste-profile import (see taste-profile.json). Applied idempotently on
+// startup: genres become genre weights and artists become favorite artists
+// (which never decay, unlike behavioral signals). Each half has its own
+// version stamp, so editing the artist list doesn't reset genre weights
+// you've tuned in Settings:
+//   generated_at        → re-applies the genre weights when changed
+//   artists_updated_at  → re-applies the artist list when changed (falls back
+//                         to generated_at)
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT_DIR } from '../config.js';
@@ -27,9 +30,10 @@ export function applyTasteProfile() {
   if (!profile) return { applied: false, reason: 'no taste-profile.json' };
 
   const stamp = profile.generated_at || 'v1';
+  const artistsStamp = profile.artists_updated_at || stamp;
   // Favorites have their own flag so installs that imported the profile
   // before favorite artists existed still pick them up once.
-  const favoritesApplied = getSetting(FAVORITES_FLAG) === stamp;
+  const favoritesApplied = getSetting(FAVORITES_FLAG) === artistsStamp;
   if (getSetting(FLAG) === stamp && favoritesApplied) {
     return { applied: false, reason: 'already applied', stamp };
   }
@@ -48,10 +52,10 @@ export function applyTasteProfile() {
     const clearSignal = db.prepare('DELETE FROM preferences WHERE tag = ?');
     for (const a of profile.artists || []) {
       if (!a.name) continue;
-      setFavoriteArtist(a.name, a.weight ?? 3, profile.source || 'profile');
+      setFavoriteArtist(a.name, a.weight ?? 3, a.source || profile.source || 'profile');
       clearSignal.run(String(a.name).trim().toLowerCase());
     }
-    setSetting(FAVORITES_FLAG, stamp);
+    setSetting(FAVORITES_FLAG, artistsStamp);
   }
 
   return {

@@ -1,7 +1,8 @@
 {
   "source": "spotify",
   "generated_at": "2026-06-24",
-  "note": "Derived once from the owner's Spotify top artists/tracks. Applied idempotently on startup by src/db/applyTasteProfile.js (guarded by the 'taste_profile_applied' setting). Bump generated_at to re-apply. Genres feed Layer 1 (manual weights); artists feed Layer 2 (behavioral signals, repeated by weight).",
+  "artists_updated_at": "2026-10-03",
+  "note": "Genres derived once from the owner's Spotify top artists/tracks; artists from Spotify plus the owner's own list (source 'manual'). Applied idempotently on startup by src/db/applyTasteProfile.js: genres become genre weights (re-applied when generated_at changes), artists become favorite artists (re-applied when artists_updated_at changes — listed artists get these weights; favorites added or removed in Settings are otherwise left alone).",
   "genres": [
     { "genre": "indie rock", "weight": 5 },
     { "genre": "punk", "weight": 5 },
@@ -26,11 +27,28 @@
   "artists": [
     { "name": "PUP", "weight": 5 },
     { "name": "alt-J", "weight": 4 },
+    { "name": "Bon Iver", "weight": 4, "source": "manual" },
+    { "name": "Bright Eyes", "weight": 4 },
+    { "name": "CAKE", "weight": 4, "source": "manual" },
+    { "name": "Cigarettes After Sex", "weight": 4, "source": "manual" },
+    { "name": "Ezra Bell", "weight": 4 },
+    { "name": "Glass Animals", "weight": 4, "source": "manual" },
+    { "name": "HappyHappy", "weight": 4, "source": "manual" },
+    { "name": "Lola Marsh", "weight": 4, "source": "manual" },
+    { "name": "Lola Young", "weight": 4 },
+    { "name": "Lord Huron", "weight": 4, "source": "manual" },
+    { "name": "Noah Kahan", "weight": 4, "source": "manual" },
+    { "name": "Ramshackle Glory", "weight": 4, "source": "manual" },
+    { "name": "Rent Strike", "weight": 4, "source": "manual" },
+    { "name": "Shakey Graves", "weight": 4, "source": "manual" },
+    { "name": "Sofi Tukker", "weight": 4, "source": "manual" },
+    { "name": "Sorcha Richardson", "weight": 4, "source": "manual" },
+    { "name": "Sufjan Stevens", "weight": 4, "source": "manual" },
+    { "name": "The Taxpayers", "weight": 4, "source": "manual" },
+    { "name": "Waxahatchee", "weight": 4, "source": "manual" },
+    { "name": "Yoke Lore", "weight": 4, "source": "manual" },
     { "name": "Cannons", "weight": 3 },
-    { "name": "Bright Eyes", "weight": 2 },
-    { "name": "Ezra Bell", "weight": 2 },
     { "name": "Laura Stevenson", "weight": 2 },
-    { "name": "Stromae", "weight": 1 },
-    { "name": "Lola Young", "weight": 1 }
+    { "name": "Stromae", "weight": 1 }
   ]
 }

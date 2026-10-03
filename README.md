@@ -256,7 +256,11 @@ Scores are computed at query time and used for **Top Picks** and the **relevance
 
 **Top Picks** shows the best-scoring events in the next 30 days, plus a **Your Artists** section: every show by a favorite or starred artist in the next year, since those tours announce months ahead.
 
-**Taste-profile seeding:** if a `taste-profile.json` exists at the repo root (this one was derived from the owner's Spotify top artists/tracks), it's imported idempotently on startup — its genres become genre weights and its artists become favorite artists. Guarded by settings keyed to `generated_at`; bump it in the JSON to re-import, or delete the file to opt out.
+**Taste-profile seeding:** if a `taste-profile.json` exists at the repo root, it's imported idempotently on startup. Its genres (derived from the owner's Spotify top artists/tracks) become genre weights, and its artists (Spotify plus the owner's own list) become favorite artists.
+- **Genres** are re-applied when `generated_at` changes.
+- **Artists** are re-applied when `artists_updated_at` changes. Listed artists get the file's weights; favorites added or removed in Settings are otherwise left alone.
+
+Editing the artist list therefore never resets genre weights you've tuned in Settings. Delete the file to opt out.
 
 ---
 
