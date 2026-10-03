@@ -5,6 +5,7 @@ function settings() {
       apiKeys: { ticketmaster: false, bandsintown: false },
       headless: true, cron: '', genres: [], artists: [], enrichment: null, preferences: [], tasteProfile: null, feeds: [], scrapers: [],
       home: { city: '', boost: 0, levels: [], cities: [] },
+      alerts: { topic: '', artists: true, digest: true, subscribeUrl: null, schedule: '' },
     },
     status: { sources: [] },
     keys: { ticketmaster: '', bandsintown: '' },
@@ -76,6 +77,25 @@ function settings() {
       if (r.error || !r.home) { this.flash(r.error || 'Could not save.'); return; }
       this.data.home = { ...this.data.home, ...r.home };
       this.flash(r.home.boost ? `Shows near ${r.home.city} get +${r.home.boost}%.` : 'Close-to-home boost is off.');
+    },
+
+    // ── Alerts ─────────────────────────────────────────────────────────────
+    randomTopic() {
+      const bytes = crypto.getRandomValues(new Uint8Array(14));
+      return 'eventlight-' + Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+    },
+    async saveAlerts() {
+      const { topic, artists, digest } = this.data.alerts;
+      const r = await postJSON('/api/settings/alerts', { topic, artists, digest });
+      if (r.alerts) this.data.alerts = r.alerts;
+      if (r.error) { this.flash(r.error); return; }
+      if (!r.alerts) { this.flash('Could not save.'); return; }
+      this.flash(r.sent?.welcome ? 'Saved — a confirmation is on its way to your phone.' : 'Alerts saved.');
+    },
+    async alertAction(url, ok) {
+      const r = await postJSON(url, {});
+      if (r.error) { this.flash(r.error); return; }
+      this.flash(r.skipped === 'nothing to pick' ? 'Nothing to send — no picks in the next two weeks.' : ok);
     },
 
     // ── API keys ───────────────────────────────────────────────────────────

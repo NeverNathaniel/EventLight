@@ -14,6 +14,15 @@ import {
   getDistinctCities,
 } from '../db/queries.js';
 import { BOOST_LEVELS, knownCities, cityKey } from '../scoring/home.js';
+import {
+  getAlertSettings,
+  saveAlertSettings,
+  checkArtistAlerts,
+  sendDigest,
+  sendTest,
+  digestScheduleLabel,
+} from '../alerts/index.js';
+import { parseTopic } from '../alerts/ntfy.js';
 import { readFeeds, writeFeeds, readScrapers, writeScrapers } from '../configFiles.js';
 import { readTasteProfile } from '../db/applyTasteProfile.js';
 import {
@@ -50,6 +59,12 @@ function homeCityChoices() {
   return [...byKey.values()].sort((a, b) => a.localeCompare(b));
 }
 
+function alertsInfo() {
+  const a = getAlertSettings();
+  const target = parseTopic(a.topic);
+  return { ...a, subscribeUrl: target ? `${target.server}/${target.topic}` : null, schedule: digestScheduleLabel() };
+}
+
 const router = express.Router();
 
 // ── Overview ──────────────────────────────────────────────────────────────
@@ -68,6 +83,7 @@ router.get('/settings', (req, res) => {
     enrichment: { artists: countEnrichedArtists(), similar: countSimilarArtists() },
     preferences: getPreferences(),
     home: { ...getHomeSetting(), levels: BOOST_LEVELS, cities: homeCityChoices() },
+    alerts: alertsInfo(),
     tasteProfile: tasteProfileInfo(),
     feeds: readFeeds(),
     scrapers: readScrapers(),
@@ -101,6 +117,38 @@ router.post('/settings/home', (req, res) => {
     setSetting('home_boost', level.value);
   }
   res.json({ home: getHomeSetting() });
+});
+
+// ── Alerts (ntfy push) ─────────────────────────────────────────────────────
+// Saving a new topic sends the "alerts are on" message right away, so you
+// know the phone is subscribed.
+router.post('/settings/alerts', async (req, res) => {
+  const { topic, artists, digest } = req.body || {};
+  const error = saveAlertSettings({ topic, artists, digest });
+  if (error) return res.status(400).json({ error });
+  let sent = null;
+  try {
+    sent = await checkArtistAlerts();
+  } catch (err) {
+    return res.json({ alerts: alertsInfo(), error: `Saved, but the alert didn't go out: ${err.message}` });
+  }
+  res.json({ alerts: alertsInfo(), sent });
+});
+
+router.post('/alerts/test', async (req, res) => {
+  try {
+    res.json(await sendTest());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/alerts/digest', async (req, res) => {
+  try {
+    res.json(await sendDigest({ force: true }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ── Manual genre weights ───────────────────────────────────────────────────

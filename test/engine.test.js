@@ -68,6 +68,15 @@ test('short favorite names need a lineup match, not a substring ("Puppy" is not 
   assert.equal(s._reasons.filter((r) => r.kind === 'favorite').length, 0);
 });
 
+test('a favorite\'s name inside another act\'s name is not a match', () => {
+  setFavoriteArtist('Cannons', 4);
+  const s = score(addEvent({ title: 'Dearheart, The Requisite, Glass Cannons' }));
+  assert.ok(!hasArtistMatch(s), JSON.stringify(s._reasons));
+  // …but a favorite the parser missed is still found in the title.
+  const missed = score(addEvent({ title: 'Big Night feat. Cannons and friends', lineup: ['Big Night'] }));
+  assert.ok(hasArtistMatch(missed), JSON.stringify(missed._reasons));
+});
+
 test('tribute nights never count as the real favorite', () => {
   const s = score(addEvent({ title: 'PUP Tribute Night' }));
   assert.ok(!hasArtistMatch(s));

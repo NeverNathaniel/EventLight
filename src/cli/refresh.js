@@ -2,11 +2,13 @@
 // Runs every adapter once and prints a summary, then exits.
 import { migrate } from '../db/migrate.js';
 import { runAll } from '../adapters/index.js';
+import { runAlerts } from '../alerts/index.js';
 
 async function main() {
   migrate();
   console.log('Running all adapters…\n');
   const { results } = await runAll();
+  await runAlerts();
 
   console.log('\n── Summary ───────────────────────────────');
   for (const r of results) {

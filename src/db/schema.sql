@@ -149,3 +149,11 @@ CREATE TABLE IF NOT EXISTS settings (
   key    TEXT PRIMARY KEY,
   value  TEXT
 );
+
+-- ── Alerts already sent ─────────────────────────────────────────────────
+-- One row per show you were told about ("<date>|<headliner>"), so each show
+-- alerts once however many sources list it or how often it's refreshed.
+CREATE TABLE IF NOT EXISTS alerts_sent (
+  key      TEXT PRIMARY KEY,
+  sent_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);

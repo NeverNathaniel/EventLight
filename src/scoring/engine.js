@@ -262,10 +262,14 @@ export function scoreEvent(event, ctx) {
   });
 
   // Favorites the parser didn't isolate ("… feat. Laura Stevenson & friends").
+  // A mention inside another act's parsed name doesn't count: "Glass Cannons"
+  // on the bill is not the band Cannons.
   if (!tribute) {
     const titleKey = ` ${artistKey(event.title)} `;
+    const actKeys = keysBySlot.flat().map((k) => ` ${k} `);
     for (const [key, fav] of ctx.favorites) {
       if (seen.has(key) || !titleMentions(titleKey, key)) continue;
+      if (actKeys.some((a) => a.includes(` ${key} `))) continue;
       seen.add(key);
       artistScore += WEIGHTS.favoriteSupport(fav.weight);
       reasons.push({ kind: 'favorite', text: `Favorite ${fav.name} is on the bill` });

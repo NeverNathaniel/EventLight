@@ -735,6 +735,7 @@ input[type='search'] { min-width: 180px; }
 .btn-ghost { background: none; }
 .btn-danger { color: var(--danger); border-color: rgba(217, 105, 74, 0.4); }
 .btn-danger:hover { background: rgba(217, 105, 74, 0.12); }
+.btn[disabled] { opacity: 0.4; cursor: default; }
 
 /* ── Modal (manual entry) ────────────────────────────────────────────────── */
 .modal-backdrop {
@@ -861,6 +862,7 @@ input[type='search'] { min-width: 180px; }
   color: var(--muted);
   margin: 0 0 16px;
 }
+.settings-section .desc a { color: var(--accent); }
 .row {
   display: flex;
   align-items: center;

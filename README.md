@@ -5,6 +5,7 @@ A self-hosted dashboard for live **music** and **comedy** across **Seattle, Taco
 - **Tonight / This Week / Top Picks / Curated / This Month / Movies / Browse All** views
 - **Movies** — what's playing at The Grand Cinema (Tacoma), with kids' movies and vapid action movies filtered out
 - **Preference engine** — favorite artists, "sounds like your favorites" discovery, genre weights, and learning from what you star — every pick says *why* it ranks
+- **Alerts** — a push on your phone when a favorite artist has a new show, plus a weekly Top Picks digest (via [ntfy](https://ntfy.sh), free, no account)
 - **Artist enrichment** — pulls the bands out of every listing title and looks up their genres (MusicBrainz) and sound-alikes (ListenBrainz) — free, keyless, cached
 - **Add a venue by URL** — paste a website and EventLight auto-detects a VenuePilot widget, RSS feed, iCal feed, or embedded event data before falling back to scraping
 - **Curate with Claude Code** — a `/curate` routine filters and ranks your events by plain-English criteria and publishes them to the dashboard
@@ -129,6 +130,9 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 | `REFRESH_CRON` | Cron expression for scheduled ingestion (default `0 */6 * * *` — every 6 hours) |
 | `REFRESH_ON_START` | `true` to run a full ingestion when the server boots |
 | `ENRICH_ARTISTS` | `true` (default) to look up artist genres and similar artists after each refresh; `false` to skip |
+| `NTFY_SERVER` / `NTFY_TOKEN` | Where alerts are sent: an [ntfy](https://ntfy.sh) server (default `https://ntfy.sh`) and an optional access token for a self-hosted, locked-down one. The topic is set in Settings |
+| `DIGEST_CRON` | When the weekly Top Picks digest goes out (default `0 9 * * 1`, Mondays 9 AM in `TZ`) |
+| `PUBLIC_URL` | Where you open EventLight (e.g. `http://nas.local:3000`); tapping the digest opens it |
 | `HOME_CITY` / `HOME_BOOST` | Defaults for **Close to Home**: your home city (default `Tacoma`) and the boost for shows near it, in percent (`0`, `25`, `50` or `100`; default `50`). Settings overrides both |
 | `ENRICH_MAX_LOOKUPS` | API calls the enrichment step may spend per refresh (default `150`, ~1/sec) — results are cached, so later refreshes only look up new artists |
 
@@ -277,6 +281,23 @@ Editing the artist list therefore never resets genre weights you've tuned in Set
 
 ---
 
+## Alerts
+
+EventLight can push to your phone through [ntfy](https://ntfy.sh), a free notification app that needs no account:
+
+1. Install ntfy ([iPhone](https://apps.apple.com/app/ntfy/id1625396347), [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)).
+2. In **Settings → Alerts**, press **Generate** for a random topic, then **Save alerts**.
+3. In the app, subscribe to that topic. **Send test** checks it arrives.
+
+What you get:
+
+- **New shows by your artists.** After every refresh, any upcoming show by a favorite or starred artist that you haven't been told about is pushed, with the date, venue and a tap-through to tickets. Each show alerts once, even if two sources list it. More than five at once arrive as one message. Shows you've already starred don't alert. The first check after you save a topic sends one "alerts are on" message listing what's already on the calendar, rather than a burst of alerts.
+- **Weekly Top Picks** (Mondays 9 AM by default, `DIGEST_CRON`): your artists and best picks for the next two weeks, one line each with why — `≈ PUP` for a sound-alike, ⌂ when it's close to home.
+
+Anyone who knows a topic on ntfy.sh can read it, which is why the generated one is long and random. To keep alerts fully private, run your own ntfy server and set `NTFY_SERVER` (and `NTFY_TOKEN` if it requires login), or paste a full topic URL into Settings.
+
+---
+
 ## Movies
 
 The **Movies** tab lists everything showing at [The Grand Cinema](https://grandcinema.com) in Tacoma over the next six weeks. It has three sections:
@@ -374,6 +395,9 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `bandsintown`, `rss`, `scraper`), the `cinema` listings, or the `enrich` step |
 | `POST` | `/api/settings/artists` | Add or re-weight a favorite artist (`{ name, weight }`) |
 | `DELETE` | `/api/settings/artists/:key` | Remove a favorite artist |
+| `POST` | `/api/settings/alerts` | Save the ntfy topic and which alerts are on (`{ topic, artists, digest }`); a new topic sends the "alerts are on" message |
+| `POST` | `/api/alerts/test` | Send a test alert |
+| `POST` | `/api/alerts/digest` | Send the Top Picks digest now |
 | `POST` | `/api/settings/home` | Set the close-to-home city and boost (`{ city, boost }`, boost one of `0`, `25`, `50`, `100`) |
 | `POST` | `/api/discover` | Probe a venue URL for RSS/iCal/JSON-LD, falling back to a scraper template |
 | `POST` | `/api/discover/add` | Save a discovered source to `feeds.json` / `scrapers.json` |

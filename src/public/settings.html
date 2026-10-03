@@ -157,6 +157,40 @@
       </div>
     </section>
 
+    <!-- ALERTS -->
+    <section class="settings-section">
+      <h2>Alerts</h2>
+      <p class="desc">A push on your phone when a favorite or starred artist has a new show, and a weekly digest of Top Picks. Sent with <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a> — free, no account: install the ntfy app (iPhone or Android), subscribe to your topic, and save it here.</p>
+      <div class="row">
+        <div class="grow">
+          <div class="name">Topic</div>
+          <div class="sub">Anyone who knows it can read your alerts, so keep it long and random.</div>
+          <div class="sub" x-show="data.alerts.subscribeUrl">Subscribe in the app, or open <a :href="data.alerts.subscribeUrl" target="_blank" rel="noopener" x-text="data.alerts.subscribeUrl"></a></div>
+        </div>
+        <input type="text" x-model="data.alerts.topic" placeholder="eventlight-…" style="min-width:220px" />
+        <button class="btn btn-ghost" @click="data.alerts.topic = randomTopic()">Generate</button>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">New shows by your artists</div><div class="sub">Checked after every refresh; each show alerts once</div></div>
+        <div class="weight-pills wide">
+          <button :class="{ on: data.alerts.artists }" @click="data.alerts.artists = true">On</button>
+          <button :class="{ on: !data.alerts.artists }" @click="data.alerts.artists = false">Off</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Weekly Top Picks</div><div class="sub" x-text="data.alerts.schedule + ' · the next two weeks'"></div></div>
+        <div class="weight-pills wide">
+          <button :class="{ on: data.alerts.digest }" @click="data.alerts.digest = true">On</button>
+          <button :class="{ on: !data.alerts.digest }" @click="data.alerts.digest = false">Off</button>
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn btn-ghost" @click="alertAction('/api/alerts/test', 'Test sent — check your phone.')" :disabled="!data.alerts.subscribeUrl">Send test</button>
+        <button class="btn btn-ghost" @click="alertAction('/api/alerts/digest', 'Digest sent.')" :disabled="!data.alerts.subscribeUrl">Send digest now</button>
+        <button class="btn btn-accent" @click="saveAlerts()">Save alerts</button>
+      </div>
+    </section>
+
     <!-- LEARNED SIGNALS -->
     <section class="settings-section">
       <h2>Learned Signals</h2>

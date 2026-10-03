@@ -57,6 +57,15 @@ export const SCRAPER_CONCURRENCY = Math.max(
   Math.min(8, parseInt(process.env.SCRAPER_CONCURRENCY || '3', 10) || 3)
 );
 
+// Alerts go out as push notifications through ntfy (https://ntfy.sh, or your
+// own ntfy server). The topic is set in Settings → Alerts.
+export const NTFY_SERVER = (process.env.NTFY_SERVER || 'https://ntfy.sh').replace(/\/+$/, '');
+export const NTFY_TOKEN = process.env.NTFY_TOKEN || '';
+// Weekly Top Picks digest. Default: Mondays at 9:00 (server time zone).
+export const DIGEST_CRON = process.env.DIGEST_CRON || '0 9 * * 1';
+// Where you open EventLight (e.g. http://nas.local:3000); tapping a digest opens it.
+export const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
+
 // Artist enrichment (MusicBrainz genre tags + ListenBrainz similar artists).
 // Both services are free and keyless; lookups are cached in SQLite and
 // rate-limited, so each refresh only spends a bounded budget on new artists.
