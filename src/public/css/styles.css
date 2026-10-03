@@ -486,6 +486,41 @@ input[type='search'] { min-width: 180px; }
   color: var(--accent);
   border-color: var(--accent-deep);
 }
+.tag.hit {
+  color: var(--text);
+  border-color: var(--muted-dim);
+}
+/* Why an event ranks — one line per reason, favorites in marquee amber. */
+.card-why {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.why {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.why-favorite,
+.why-learned {
+  color: var(--accent);
+}
+.why-similar {
+  color: var(--text);
+}
+.why-penalty {
+  color: var(--muted-dim);
+}
+.section-sub {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin: -8px 0 14px;
+}
+.artists-block {
+  margin-bottom: 34px;
+}
 .card-reason {
   font-family: var(--font-title);
   font-size: 0.86rem;

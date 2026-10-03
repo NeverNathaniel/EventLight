@@ -1,10 +1,11 @@
 // Source auto-discovery: given a venue website URL, probe for the cleanest
 // ingestion method in order of preference:
 //
-//   1. RSS / Atom feed   (autodiscovery <link> tags, then common paths)
-//   2. iCal feed         (.ics links / webcal)
-//   3. JSON-LD           (schema.org Event structured data embedded in the page)
-//   4. Scrape            (fallback — return a ready-to-edit scraper template)
+//   1. VenuePilot        (ticketing widget with a public structured-events API)
+//   2. RSS / Atom feed   (autodiscovery <link> tags, then common paths)
+//   3. iCal feed         (.ics links / webcal)
+//   4. JSON-LD           (schema.org Event structured data embedded in the page)
+//   5. Scrape            (fallback — return a ready-to-edit scraper template)
 //
 // Steps 1–3 are lightweight (axios + parsing, no browser); only the fallback
 // needs Playwright at ingestion time.
@@ -12,6 +13,7 @@ import axios from 'axios';
 import Parser from 'rss-parser';
 import ical from 'node-ical';
 import { classify, toISODate, toTime, clean, absoluteUrl } from './adapters/util.js';
+import { fetchVenuePilotEvents } from './adapters/venuepilot.js';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
@@ -32,7 +34,14 @@ const PROVIDERS = [
   ['ticketweb', 'ticketweb.'],
   ['prekindle', 'prekindle.com'],
   ['axs', 'axs.com'],
+  ['venuepilot', 'venuepilot'],
 ];
+
+// The VenuePilot widget's account id, from the page's venuepilotSettings script.
+export function findVenuePilotAccount(html) {
+  const m = String(html || '').match(/venuepilotSettings[\s\S]{0,600}?accountIds["']?\s*:\s*\[\s*(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
 
 async function fetchHtml(url) {
   const res = await axios.get(url, {
@@ -218,7 +227,19 @@ export async function discoverSource(url) {
   const id = slugify(name) || slugify(new URL(finalUrl).hostname);
   const links = findFeedLinks(html, finalUrl);
   const providers = detectProviders(html);
-  const result = { url, finalUrl, name, providers, rss: null, ical: null, jsonld: null, recommended: null };
+  const result = { url, finalUrl, name, providers, venuepilot: null, rss: null, ical: null, jsonld: null, recommended: null };
+
+  // 0. VenuePilot widget — the cleanest source when present (structured
+  // events with billed artists), and the widget itself can't be scraped.
+  const vpAccount = findVenuePilotAccount(html);
+  if (vpAccount) {
+    try {
+      const events = await fetchVenuePilotEvents({ accountId: vpAccount, id, name });
+      if (events.length) result.venuepilot = { accountId: vpAccount, count: events.length };
+    } catch {
+      /* fall through to the other methods */
+    }
+  }
 
   // 1. RSS — autodiscovery links first, then common paths.
   for (const candidate of [...links.rss, ...RSS_PATHS.map((p) => absoluteUrl(p, finalUrl))]) {
@@ -240,7 +261,14 @@ export async function discoverSource(url) {
 
   // Recommend the best available method.
   const base = { id, name, venue: name, city: '', category: 'music', enabled: true };
-  if (result.rss) {
+  if (result.venuepilot) {
+    result.recommended = {
+      method: 'venuepilot',
+      target: 'feeds',
+      config: { ...base, url: finalUrl, type: 'venuepilot', accountId: result.venuepilot.accountId },
+      sampleCount: result.venuepilot.count,
+    };
+  } else if (result.rss) {
     result.recommended = {
       method: 'rss',
       target: 'feeds',

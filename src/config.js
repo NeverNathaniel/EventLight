@@ -11,7 +11,8 @@ const __dirname = path.dirname(__filename);
 // Project root is one level above /src.
 export const ROOT_DIR = path.resolve(__dirname, '..');
 export const DATA_DIR = path.join(ROOT_DIR, 'data');
-export const DB_PATH = path.join(DATA_DIR, 'events.db');
+// EVENTLIGHT_DB lets tests use a throwaway database (e.g. ":memory:").
+export const DB_PATH = process.env.EVENTLIGHT_DB || path.join(DATA_DIR, 'events.db');
 export const PUBLIC_DIR = path.join(__dirname, 'public');
 export const FEEDS_PATH = path.join(ROOT_DIR, 'feeds.json');
 export const SCRAPERS_PATH = path.join(ROOT_DIR, 'scrapers.json');
@@ -50,6 +51,18 @@ export const SCRAPER_CONCURRENCY = Math.max(
   1,
   Math.min(8, parseInt(process.env.SCRAPER_CONCURRENCY || '3', 10) || 3)
 );
+
+// Artist enrichment (MusicBrainz genre tags + ListenBrainz similar artists).
+// Both services are free and keyless; lookups are cached in SQLite and
+// rate-limited, so each refresh only spends a bounded budget on new artists.
+export const ENRICH_ARTISTS =
+  String(process.env.ENRICH_ARTISTS ?? 'true').toLowerCase() !== 'false';
+export const ENRICH_MAX_LOOKUPS = Math.max(
+  0,
+  parseInt(process.env.ENRICH_MAX_LOOKUPS || '150', 10) || 0
+);
+// MusicBrainz asks every client to identify itself with a contact URL.
+export const USER_AGENT = 'EventLight/1.0 (+https://github.com/NeverNathaniel/EventLight)';
 
 // API keys are read lazily so the Settings page can update .env at runtime.
 export function getApiKeys() {

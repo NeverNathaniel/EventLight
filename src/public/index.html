@@ -149,12 +149,21 @@
 
     <!-- TOP PICKS -->
     <section x-show="view==='top' && !loading">
+      <template x-if="top.artists && top.artists.length">
+        <div class="artists-block">
+          <h2 class="section-head">Your Artists · Coming Up</h2>
+          <p class="section-sub">Favorites and artists you've starred, up to a year out.</p>
+          <div class="cards">
+            <template x-for="ev in top.artists" :key="ev.id"><div x-html="card(ev, true)"></div></template>
+          </div>
+        </div>
+      </template>
       <h2 class="section-head">Top Picks · Next 30 Days</h2>
       <div class="cards">
         <template x-for="ev in top.events" :key="ev.id"><div x-html="card(ev, true)"></div></template>
       </div>
       <template x-if="!top.events.length">
-        <div class="empty"><div class="big">NO PICKS YET</div><div class="hint">Set genre weights in Settings, or mark a few events Interested to train the engine.</div></div>
+        <div class="empty"><div class="big">NO PICKS YET</div><div class="hint">Add favorite artists and genre weights in Settings, or mark a few events Interested to train the engine.</div></div>
       </template>
     </section>
 

@@ -1,15 +1,18 @@
 // One-off taste-profile import (derived from Spotify; see taste-profile.json).
-// Applied idempotently on startup: genres become Layer-1 manual weights,
-// favorite artists become Layer-2 behavioral signals (repeated by weight).
-// Guarded by the 'taste_profile_applied' setting and keyed to generated_at, so
-// it runs once — bump generated_at in the JSON to re-import.
+// Applied idempotently on startup: genres become Layer-1 manual weights and
+// artists become favorite artists (which never decay, unlike behavioral
+// signals). Guarded by settings keyed to generated_at, so it runs once —
+// bump generated_at in the JSON to re-import.
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT_DIR } from '../config.js';
-import { setManualGenre, recordSignals, getSetting, setSetting } from './queries.js';
+import db from './index.js';
+import { setManualGenre, getSetting, setSetting } from './queries.js';
+import { setFavoriteArtist } from './artists.js';
 
 const TASTE_PATH = path.join(ROOT_DIR, 'taste-profile.json');
 const FLAG = 'taste_profile_applied';
+const FAVORITES_FLAG = 'taste_profile_favorites';
 
 export function readTasteProfile() {
   try {
@@ -24,25 +27,33 @@ export function applyTasteProfile() {
   if (!profile) return { applied: false, reason: 'no taste-profile.json' };
 
   const stamp = profile.generated_at || 'v1';
-  if (getSetting(FLAG) === stamp) {
+  // Favorites have their own flag so installs that imported the profile
+  // before favorite artists existed still pick them up once.
+  const favoritesApplied = getSetting(FAVORITES_FLAG) === stamp;
+  if (getSetting(FLAG) === stamp && favoritesApplied) {
     return { applied: false, reason: 'already applied', stamp };
   }
 
   // Layer 1 — manual genre weights.
-  for (const g of profile.genres || []) {
-    if (g.genre) setManualGenre(g.genre, g.weight ?? 3);
+  if (getSetting(FLAG) !== stamp) {
+    for (const g of profile.genres || []) {
+      if (g.genre) setManualGenre(g.genre, g.weight ?? 3);
+    }
+    setSetting(FLAG, stamp);
   }
 
-  // Layer 2 — favorite-artist signals, recorded `weight` times so heavier
-  // artists carry a stronger behavioral boost.
-  const tags = [];
-  for (const a of profile.artists || []) {
-    const n = Math.max(1, parseInt(a.weight, 10) || 1);
-    for (let i = 0; i < n; i += 1) tags.push(a.name);
+  // Favorite artists. Earlier versions stored these as decaying behavioral
+  // signals (which faded to almost nothing within a few months) — clear those.
+  if (!favoritesApplied) {
+    const clearSignal = db.prepare('DELETE FROM preferences WHERE tag = ?');
+    for (const a of profile.artists || []) {
+      if (!a.name) continue;
+      setFavoriteArtist(a.name, a.weight ?? 3, profile.source || 'profile');
+      clearSignal.run(String(a.name).trim().toLowerCase());
+    }
+    setSetting(FAVORITES_FLAG, stamp);
   }
-  if (tags.length) recordSignals(tags);
 
-  setSetting(FLAG, stamp);
   return {
     applied: true,
     stamp,

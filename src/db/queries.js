@@ -1,6 +1,7 @@
 // Prepared statements and higher-level query helpers.
 import db from './index.js';
 import { safeHttpUrl } from '../adapters/util.js';
+import { parseLineup } from '../lineup.js';
 
 // ── Normalisation / dedupe ──────────────────────────────────────────────
 function norm(s) {
@@ -24,11 +25,11 @@ const selectByKey = db.prepare('SELECT id FROM events WHERE dedupe_key = ?');
 const insertEvent = db.prepare(`
   INSERT INTO events
     (dedupe_key, source, source_name, title, artist, venue, city, date, time,
-     doors_time, category, genre_tags, ticket_url, image_url, price_range,
+     doors_time, category, genre_tags, ticket_url, image_url, price_range, lineup,
      interested, hidden, created_at, updated_at)
   VALUES
     (@dedupe_key, @source, @source_name, @title, @artist, @venue, @city, @date, @time,
-     @doors_time, @category, @genre_tags, @ticket_url, @image_url, @price_range,
+     @doors_time, @category, @genre_tags, @ticket_url, @image_url, @price_range, @lineup,
      @interested, @hidden, datetime('now'), datetime('now'))
 `);
 
@@ -38,7 +39,8 @@ const updateEvent = db.prepare(`
     source = @source, source_name = @source_name, title = @title, artist = @artist,
     venue = @venue, city = @city, date = @date, time = @time, doors_time = @doors_time,
     category = @category, genre_tags = @genre_tags, ticket_url = @ticket_url,
-    image_url = @image_url, price_range = @price_range, updated_at = datetime('now')
+    image_url = @image_url, price_range = @price_range, lineup = @lineup,
+    updated_at = datetime('now')
   WHERE dedupe_key = @dedupe_key
 `);
 
@@ -52,12 +54,17 @@ function normalizeEvent(raw) {
   const category = ['music', 'comedy'].includes((raw.category || '').toLowerCase())
     ? raw.category.toLowerCase()
     : 'other';
+  // Who's playing: adapters with structured data pass `lineup`; everything
+  // else is parsed from the title (plus an optional support line).
+  const lineup = Array.isArray(raw.lineup) && raw.lineup.length
+    ? raw.lineup.map((n) => String(n).trim()).filter(Boolean).slice(0, 8)
+    : parseLineup(title, { artist: raw.artist, support: raw.support });
   return {
     dedupe_key: dedupeKey(title, date, venue),
     source: raw.source || 'api',
     source_name: raw.source_name || raw.source || 'unknown',
     title,
-    artist: raw.artist || null,
+    artist: raw.artist || lineup[0] || null,
     venue,
     city: raw.city || null,
     date,
@@ -72,6 +79,7 @@ function normalizeEvent(raw) {
     ticket_url: safeHttpUrl(raw.ticket_url),
     image_url: safeHttpUrl(raw.image_url),
     price_range: raw.price_range || null,
+    lineup: JSON.stringify(lineup),
     interested: 0,
     hidden: 0,
   };
@@ -103,6 +111,23 @@ export const upsertEvents = db.transaction((rawList) => {
   }
   return { found: rawList.length, added, updated, invalid };
 });
+
+// Drop upcoming listings a source no longer shows (cancelled, moved, or a
+// re-labelled venue), after a successful run of that source. Rows you starred
+// or hid are kept so your choices aren't lost if a listing flickers.
+export function pruneStaleEvents(sourceName, runStartedAt, today) {
+  return db
+    .prepare(
+      `DELETE FROM events
+       WHERE source_name = ? AND date >= ? AND updated_at < ?
+         AND interested = 0 AND hidden = 0`
+    )
+    .run(sourceName, today, runStartedAt).changes;
+}
+
+export function dbNow() {
+  return db.prepare("SELECT datetime('now') AS now").get().now;
+}
 
 // ── Event listing with filters / sorting ────────────────────────────────
 function buildWhere(filters = {}) {

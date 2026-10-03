@@ -12,6 +12,13 @@ import {
 } from '../db/queries.js';
 import { readFeeds, writeFeeds, readScrapers, writeScrapers } from '../configFiles.js';
 import { readTasteProfile } from '../db/applyTasteProfile.js';
+import {
+  getFavoriteArtists,
+  setFavoriteArtist,
+  deleteFavoriteArtist,
+  countSimilarArtists,
+  countEnrichedArtists,
+} from '../db/artists.js';
 import { updateEnv } from '../envFile.js';
 import { getApiKeys, HEADLESS, REFRESH_CRON } from '../config.js';
 import { buildIcs } from '../ics.js';
@@ -44,6 +51,8 @@ router.get('/settings', (req, res) => {
     headless: HEADLESS,
     cron: REFRESH_CRON,
     genres: getManualGenres(),
+    artists: getFavoriteArtists(),
+    enrichment: { artists: countEnrichedArtists(), similar: countSimilarArtists() },
     preferences: getPreferences(),
     tasteProfile: tasteProfileInfo(),
     feeds: readFeeds(),
@@ -80,6 +89,20 @@ router.post('/settings/genres', (req, res) => {
 router.delete('/settings/genres/:genre', (req, res) => {
   deleteManualGenre(req.params.genre);
   res.json({ genres: getManualGenres() });
+});
+
+// ── Favorite artists ───────────────────────────────────────────────────────
+// Similar artists for a new favorite are fetched on the next refresh.
+router.post('/settings/artists', (req, res) => {
+  const { name, weight } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'name is required' });
+  setFavoriteArtist(String(name).slice(0, 120), weight);
+  res.json({ artists: getFavoriteArtists() });
+});
+
+router.delete('/settings/artists/:key', (req, res) => {
+  deleteFavoriteArtist(req.params.key);
+  res.json({ artists: getFavoriteArtists() });
 });
 
 // ── Feed management (feeds.json) ───────────────────────────────────────────

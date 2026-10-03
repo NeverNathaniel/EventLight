@@ -23,6 +23,7 @@ const WAITFOR_TIMEOUT_MS = 12000;
 const MAX_ITEMS = 250; // cap per page — a selector matching more than this is drifting
 const MAX_TITLE_LEN = 300; // longer "titles" are almost always scooped-up page copy
 const BLOCKED_RESOURCES = new Set(['image', 'media', 'font']);
+const MAX_PAGES = 20; // hard cap on pagination.maxPages
 
 // Validate a scraper config before spending a page load on it.
 // Returns an error message, or null when the config is runnable.
@@ -39,7 +40,54 @@ export function validateScraperConfig(cfg) {
   if (!cfg.selectors || !String(cfg.selectors.item || '').trim()) {
     return 'selectors.item is not configured — set it to the repeating per-event element';
   }
+  if (cfg.pagination) {
+    const p = cfg.pagination;
+    if (!/\{(?:offset|page)\}/.test(p.url || '')) {
+      return 'pagination.url must contain an {offset} or {page} placeholder';
+    }
+    try {
+      if (new URL(p.url.replace(/\{\w+\}/g, '0')).origin !== new URL(cfg.url).origin) {
+        return 'pagination.url must be on the same site as url';
+      }
+    } catch {
+      return `Invalid pagination.url "${p.url}"`;
+    }
+  }
   return null;
+}
+
+// Runs in the browser context: fetch a site's "load more" pages and append
+// them to the document so extractInPage sees every event, not just the first
+// screenful. `url` contains {offset} (start + i·step) or {page} (2, 3, …);
+// format "json-html" means the endpoint returns a JSON-encoded HTML string
+// (AEG/Carbonhouse venue sites), otherwise the body is HTML. Stops at the
+// first empty page.
+export async function loadMorePages({ url, start = 0, step = 1, maxPages, format, itemSelector }) {
+  let added = 0;
+  for (let i = 0; i < maxPages; i += 1) {
+    const pageUrl = url
+      .replace('{offset}', String(start + i * step))
+      .replace('{page}', String(i + 2));
+    let html = '';
+    try {
+      const res = await fetch(pageUrl, { credentials: 'same-origin' });
+      if (!res.ok) break;
+      html = await res.text();
+      if (format === 'json-html') html = JSON.parse(html);
+    } catch {
+      break;
+    }
+    if (typeof html !== 'string' || !html.trim()) break;
+    const holder = document.createElement('div');
+    holder.setAttribute('data-eventlight-page', String(i + 2));
+    holder.innerHTML = html;
+    const found = holder.querySelectorAll(itemSelector).length;
+    if (!found) break;
+    document.body.appendChild(holder);
+    added += found;
+    await new Promise((r) => setTimeout(r, 300)); // stay polite
+  }
+  return added;
 }
 
 // Runs in the browser context: pull raw fields per event item using the
@@ -61,6 +109,10 @@ export function extractInPage({ selectors, maxItems }) {
     const linkEl = pick(el, selectors.ticketLink);
     const imgEl = pick(el, selectors.image);
     const priceEl = pick(el, selectors.price);
+    // Optional: per-item venue (multi-venue listings), support acts, show time.
+    const venueEl = pick(el, selectors.venue);
+    const supportEl = pick(el, selectors.support);
+    const timeEl = pick(el, selectors.time);
     // A <time datetime="…"> is the most reliable date source: prefer it on the
     // matched date element, then anywhere within the item, then fall back to text.
     const timeAttr =
@@ -73,8 +125,42 @@ export function extractInPage({ selectors, maxItems }) {
       link: linkEl?.getAttribute('href') || '',
       image: imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '',
       price: priceEl?.textContent || '',
+      venue: venueEl?.textContent || '',
+      support: supportEl?.textContent || '',
+      time: timeEl?.textContent || '',
     };
   });
+}
+
+// Turn one extracted item into an event (or null if it isn't usable).
+// Exported for tests.
+export function mapScrapedItem(r, cfg, source_name = cfg.id || cfg.name) {
+  const title = clean(r.name);
+  const date = toISODate(r.date);
+  if (!title || !date || title.length > MAX_TITLE_LEN) return null;
+  // Multi-venue listings (the Showbox sells Climate Pledge, WAMU, …) name the
+  // room per item; `skipVenues` drops rooms outside your area.
+  const itemVenue = clean(r.venue).replace(/^@\s*/, '');
+  const venue = itemVenue || cfg.venue || cfg.name;
+  const skip = (cfg.skipVenues || []).some((v) => venue.toLowerCase().includes(String(v).toLowerCase()));
+  if (skip) return null;
+  return {
+    source: 'scrape',
+    source_name,
+    title,
+    artist: null,
+    support: clean(r.support) || null,
+    venue,
+    city: cfg.city || null,
+    date,
+    time: toTime(r.time) || toTime(r.date),
+    doors_time: null,
+    category: classify(title, cfg.category || 'music'),
+    genre_tags: cfg.category ? [cfg.category] : [],
+    ticket_url: absoluteUrl(clean(r.link), cfg.url),
+    image_url: absoluteUrl(clean(r.image), cfg.url),
+    price_range: clean(r.price) || null,
+  };
 }
 
 async function runScraper(browser, cfg) {
@@ -92,8 +178,9 @@ async function runScraper(browser, cfg) {
   try {
     // Skip heavy assets — the extractor reads src attributes from the DOM, so
     // the images themselves never need to download.
+    // fallback() (not continue()) so other route handlers can still see the request.
     await context.route('**/*', (route) =>
-      BLOCKED_RESOURCES.has(route.request().resourceType()) ? route.abort() : route.continue()
+      BLOCKED_RESOURCES.has(route.request().resourceType()) ? route.abort() : route.fallback()
     );
 
     // One retry absorbs transient network hiccups without hammering the site.
@@ -116,34 +203,23 @@ async function runScraper(browser, cfg) {
       await page.waitForSelector(cfg.waitFor, { timeout: WAITFOR_TIMEOUT_MS }).catch(() => {});
     }
 
+    if (cfg.pagination) {
+      await page.evaluate(loadMorePages, {
+        url: cfg.pagination.url,
+        start: Number(cfg.pagination.start) || 0,
+        step: Number(cfg.pagination.step) || 1,
+        maxPages: Math.min(MAX_PAGES, Number(cfg.pagination.maxPages) || 5),
+        format: cfg.pagination.format || 'html',
+        itemSelector: cfg.selectors.item,
+      });
+    }
+
     const raw = await page.evaluate(extractInPage, {
       selectors: cfg.selectors,
       maxItems: MAX_ITEMS,
     });
 
-    const events = raw
-      .map((r) => {
-        const title = clean(r.name);
-        const date = toISODate(r.date);
-        if (!title || !date || title.length > MAX_TITLE_LEN) return null;
-        return {
-          source: 'scrape',
-          source_name,
-          title,
-          artist: null,
-          venue: cfg.venue || cfg.name,
-          city: cfg.city || null,
-          date,
-          time: toTime(r.date),
-          doors_time: null,
-          category: classify(title, cfg.category || 'music'),
-          genre_tags: cfg.category ? [cfg.category] : [],
-          ticket_url: absoluteUrl(clean(r.link), cfg.url),
-          image_url: absoluteUrl(clean(r.image), cfg.url),
-          price_range: clean(r.price) || null,
-        };
-      })
-      .filter(Boolean);
+    const events = raw.map((r) => mapScrapedItem(r, cfg, source_name)).filter(Boolean);
 
     if (raw.length === 0) {
       // Selector drift is the usual culprit — surface it clearly.
@@ -158,7 +234,7 @@ async function runScraper(browser, cfg) {
       );
     }
 
-    return { source: 'scrape', source_name, status: 'ok', events };
+    return { source: 'scrape', source_name, status: 'ok', events, complete: true };
   } catch (err) {
     return fail(`${cfg.url} — ${err.message}`);
   } finally {

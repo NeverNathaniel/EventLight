@@ -14,9 +14,15 @@ const MUSIC_HINTS = [
   'hip hop', 'rap', 'punk', 'metal', 'folk', 'electronic', 'indie', 'orchestra', 'symphony',
 ];
 
+// Venue nights that aren't shows at all — trivia, movie nights, bingo… Music
+// venues list these alongside concerts, and they shouldn't count as music.
+const NOT_A_SHOW_RE =
+  /\b(?:trivia|bingo|karaoke|burles\w*|drag (?:show|brunch|bingo|night|queen)|drag and|movie night|movie|film|screening|craft|market|yoga|workshop|storytime|paint night)\b|karaoke/i;
+
 // Best-effort category from arbitrary text (title, classification, etc.).
 export function classify(text, fallback = 'other') {
   const t = String(text || '').toLowerCase();
+  if (NOT_A_SHOW_RE.test(t)) return 'other';
   if (COMEDY_HINTS.some((h) => t.includes(h))) return 'comedy';
   if (MUSIC_HINTS.some((h) => t.includes(h))) return 'music';
   return fallback;

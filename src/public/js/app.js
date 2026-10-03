@@ -28,7 +28,7 @@ function dashboard() {
 
     tonight: { date: localISO(new Date()), events: [] },
     week: { days: [] },
-    top: { events: [] },
+    top: { events: [], artists: [] },
     month: { month: localISO(new Date()).slice(0, 7), counts: {}, events: [], cells: [], selectedDay: null },
     browse: { events: [], total: 0, page: 1, pages: 1, pageSize: 50 },
     curated: { criteria: null, generated_at: null, events: [] },
@@ -168,6 +168,7 @@ function dashboard() {
       const pools = [
         this.tonight.events,
         this.top.events,
+        this.top.artists || [],
         this.browse.events,
         this.month.events,
         this.curated.events,
@@ -314,16 +315,27 @@ function dashboard() {
       const time = fmtTime(ev.time);
       const date = this.heroMd(ev.date);
       const interested = ev.interested ? 1 : 0;
-      const tags = String(ev.genre_tags || '')
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean)
+      // Scored events carry merged tags (source + looked-up artist genres).
+      const tags = (ev._tags || String(ev.genre_tags || '').split(','))
+        .map((t) => String(t).trim())
+        .filter((t) => t && t !== 'music')
         .slice(0, 4);
+      const matched = (ev._matched || []).map((g) => ` ${g.toLowerCase().replace(/-/g, ' ')} `);
+      const isHit = (t) => matched.some((g) => ` ${t.toLowerCase().replace(/-/g, ' ')} `.includes(g));
       const scoreTag =
         showScore && ev._score > 0
           ? `<span class="tag score">★ ${ev._score.toFixed(1)}</span>`
           : '';
-      const tagsHtml = tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('');
+      const tagsHtml = tags
+        .map((t) => `<span class="tag ${isHit(t) ? 'hit' : ''}">${esc(t)}</span>`)
+        .join('');
+      // Why it ranks: favorites, sound-alikes, starred artists, penalties.
+      // (Genre matches show as highlighted tags instead.)
+      const why = (ev._reasons || [])
+        .filter((r) => r.kind !== 'genre')
+        .slice(0, 2)
+        .map((r) => `<div class="why why-${r.kind}">${WHY_ICON[r.kind] || '·'} ${esc(r.text)}</div>`)
+        .join('');
       const price = ev.price_range ? `<span class="price">${esc(ev.price_range)}</span>` : '';
       // http(s) only — never render a scraped javascript:/data: URL as an href.
       const ticket = /^https?:\/\//i.test(ev.ticket_url || '')
@@ -347,6 +359,7 @@ function dashboard() {
               </div>
             </div>
             <div class="card-meta">${esc(ev.venue || '')}${ev.city ? `<span class="city">${esc(ev.city)}</span>` : ''}</div>
+            ${why ? `<div class="card-why">${why}</div>` : ''}
             <div class="tags">${scoreTag}${tagsHtml}</div>
             ${reason}
             <div class="card-foot">${price}${ticket}</div>
@@ -369,6 +382,8 @@ function dashboard() {
 }
 
 // ── module-level helpers ───────────────────────────────────────────────────
+const WHY_ICON = { favorite: '♥', learned: '★', similar: '≈', 'learned-tags': '↺', penalty: '↓' };
+
 function blankForm() {
   return {
     title: '', artist: '', venue: '', city: '', category: 'music',

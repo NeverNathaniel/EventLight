@@ -22,4 +22,15 @@ db.pragma('foreign_keys = ON');
 const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
 db.exec(schema);
 
+// CREATE TABLE IF NOT EXISTS never alters an existing table, so columns added
+// after the first release are bolted on here — also before any prepare().
+for (const [table, name, def] of [
+  ['events', 'lineup', "TEXT NOT NULL DEFAULT '[]'"],
+  ['events', 'artist_tags', "TEXT NOT NULL DEFAULT ''"],
+  ['artists', 'similar_at', 'TEXT'],
+]) {
+  const have = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === name);
+  if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+}
+
 export default db;

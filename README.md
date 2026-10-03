@@ -3,8 +3,9 @@
 A self-hosted dashboard for live **music** and **comedy** across **Seattle, Tacoma, and the South Sound**. EventLight pulls events from APIs, RSS/iCal feeds, and headless web scrapers on a schedule, merges them into one deduplicated list, scores them against your taste, and presents everything in a dark "venue marquee" dashboard.
 
 - **Tonight / This Week / Top Picks / Curated / This Month / Browse All** views
-- **Preference engine** — manual genre weights + behavioral learning from what you mark _Interested_
-- **Add a venue by URL** — paste a website and EventLight auto-detects an RSS feed, iCal feed, or embedded event data before falling back to scraping
+- **Preference engine** — favorite artists, "sounds like your favorites" discovery, genre weights, and learning from what you star — every pick says *why* it ranks
+- **Artist enrichment** — pulls the bands out of every listing title and looks up their genres (MusicBrainz) and sound-alikes (ListenBrainz) — free, keyless, cached
+- **Add a venue by URL** — paste a website and EventLight auto-detects a VenuePilot widget, RSS feed, iCal feed, or embedded event data before falling back to scraping
 - **Curate with Claude Code** — a `/curate` routine filters and ranks your events by plain-English criteria and publishes them to the dashboard
 - **Modular ingestion** — one adapter per source; failures are isolated and logged
 - **Local-first** — Node + Express + SQLite, no external database, no build step
@@ -127,6 +128,8 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 | `REQUEST_DELAY_MS` | Polite delay between outbound requests within an adapter (default `350`) |
 | `REFRESH_CRON` | Cron expression for scheduled ingestion (default `0 */6 * * *` — every 6 hours) |
 | `REFRESH_ON_START` | `true` to run a full ingestion when the server boots |
+| `ENRICH_ARTISTS` | `true` (default) to look up artist genres and similar artists after each refresh; `false` to skip |
+| `ENRICH_MAX_LOOKUPS` | API calls the enrichment step may spend per refresh (default `150`, ~1/sec) — results are cached, so later refreshes only look up new artists |
 
 > API keys are **never** hardcoded — they're read from `.env` exclusively. The Settings page reports only whether each key is configured, never its value.
 
@@ -138,9 +141,9 @@ Each source is an adapter in `src/adapters/`. The scheduler runs them all every 
 
 | Type | Sources |
 | --- | --- |
-| **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy), Eventbrite (Seattle/Tacoma), Bandsintown (resolves artists you've marked _Interested_) |
-| **RSS / iCal / JSON-LD** | Configured in `feeds.json` — Tacoma Comedy Club and Emerald City Comedy Club seeded (JSON-LD); most other venues don't publish feeds, so add new ones with **Add a Venue by URL** |
-| **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, The Valley, Showbox, Neumos, The Crocodile, Jazzbones, Clock-Out Lounge, Airport Tavern, and Cryptatropa (Olympia) seeded with selectors verified against the live sites (2026-07). Several more ship **disabled** with notes: venues better served by the Ticketmaster API, JS-rendered sites whose selectors need in-browser tuning first, and dead/expired domains |
+| **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy, the next 6 months, parking/VIP add-ons filtered out), Eventbrite (Seattle/Tacoma), Bandsintown (resolves your favorite artists and artists you've marked _Interested_) |
+| **Feeds** | Configured in `feeds.json` — Tacoma Comedy Club and Emerald City Comedy Club (JSON-LD), plus Conor Byrne Pub, Jazzbones and Tracyton Movie House (VenuePilot); most other venues don't publish feeds, so add new ones with **Add a Venue by URL** |
+| **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, The Valley, Showbox (every AEG Seattle room, paged through "Load More"), Neumos (paged), The Crocodile, Clock-Out Lounge, Airport Tavern, and Cryptatropa (Olympia) seeded with selectors verified against the live sites (2026-10). Several more ship **disabled** with notes: venues better served by the Ticketmaster API, JS-rendered sites whose selectors need in-browser tuning first, and dead/expired domains |
 | **Manual** | The **＋ Add** button in the UI |
 
 > **Most Seattle/Tacoma venues don't publish feeds** — they run on JS-rendered ticketing platforms (AXS, Ticketmaster, TicketWeb). So `feeds.json` ships empty. Get coverage from the **Ticketmaster API** (one key covers every venue that sells through it) and from **scrapers** for the rest. Use **Add a Venue by URL** to let EventLight detect whichever method a given site supports.
@@ -173,7 +176,7 @@ Either use **Settings → RSS / iCal Feeds → Add feed** in the UI, or edit `fe
 }
 ```
 
-- `type` is `rss`, `ical`, or `jsonld` (for venue pages with embedded `schema.org/Event` data — set `url` to the page itself).
+- `type` is `rss`, `ical`, `jsonld` (for venue pages with embedded `schema.org/Event` data — set `url` to the page itself), or `venuepilot` (for venues using the VenuePilot ticketing widget — add `"accountId"`, found in the page's `venuepilotSettings` script; **Add a Venue by URL** fills it in for you).
 - Set `enabled` to `false` to skip it on refresh.
 - No restart needed for UI edits; a hand-edited file is picked up on the next refresh.
 
@@ -204,11 +207,16 @@ Use **Settings → Web Scrapers → Add scraper**, or edit `scrapers.json`:
 
 - `selectors.item` is the repeating element for each event; the other selectors are queried **within** each item (comma-separated fallback lists are allowed).
 - `waitFor` is an optional selector to wait for on JS-rendered pages.
+- Optional per-item selectors: `venue` (for listings that span several rooms), `support` (a separate "with …" line), and `time` (when the time isn't in the date element).
+- `skipVenues` is an optional list of venue-name substrings to drop (e.g. out-of-town rooms on a promoter's list).
+- `pagination` pages through a "Load More" listing using the site's own endpoint: `{ "url": "https://…/events_ajax/{offset}?…", "start": 20, "step": 20, "maxPages": 10, "format": "json-html" }`. Use `{offset}` (start + n·step) or `{page}` (2, 3, …); `format` is `json-html` when the endpoint returns a JSON-encoded HTML string, otherwise `html`. Pages are fetched from inside the venue's page, so the URL must be on the same site.
 - A `<time datetime="…">` element is the most reliable date source — the scraper prefers a `datetime` attribute on the matched date element, then any `time[datetime]` inside the item, then the element's text.
 - Dates without a year (`SAT JUL 4`) get the year inferred: this year, or next year once the date is more than ~45 days in the past. Formats like `Jul 4`, `July 4th, 2026`, `4 Jul 2026`, `7/4`, and `07/04/2026` all parse.
 - To debug selectors visually, set `HEADLESS=false` in `.env` and re-run the scraper from Settings.
 
-The scraper validates each config before spending a page load on it, blocks image/media/font downloads (faster and lighter on the venue's server), retries a failed navigation once, and caps extraction at 250 items per page so one bad selector can't flood the database.
+The scraper validates each config before spending a page load on it, blocks image/media/font downloads (faster and lighter on the venue's server), retries a failed navigation once, and caps extraction at 250 items per page so one bad selector can't flood the database. Trivia, movie, bingo, karaoke and drag nights at music venues are filed as _other_ rather than music.
+
+After a successful scrape, or a successful iCal / JSON-LD / VenuePilot feed run (sources that list a venue's whole calendar), upcoming listings that source no longer shows — cancelled or moved — are removed, unless you starred or hid them. RSS feeds and APIs are never pruned this way, since they only return a window of results.
 
 **Selector drift** (a site changing its markup) is the usual cause of a scraper returning zero events. EventLight logs this clearly and distinguishes the two cases — *no items matched* (fix `selectors.item`) vs. *items matched but none had a usable title + date* (fix the `name`/`date` selectors). Check the status bar at the bottom of the dashboard, or **Settings → Last Refresh by source**, and `GET /api/status/logs` for the raw log.
 
@@ -218,17 +226,36 @@ The scraper validates each config before spending a page load on it, blocks imag
 
 - **UI:** the **Refresh now** button on the dashboard, or **Settings → Maintenance** to run all sources or a single adapter.
 - **CLI:** `npm run refresh` runs every adapter once and prints a summary, then exits.
+- **Artist backfill:** `npm run enrich` (Docker: `docker compose exec eventlight npm run enrich`) spends up to 1000 lookups (`-- --max N` to change) filling the artist cache in one go — worth running once after the first refresh, since a scheduled refresh only spends `ENRICH_MAX_LOOKUPS`.
 
 ---
 
 ## Preference engine
 
-Scores are computed at query time and used for **Top Picks** and the **relevance** sort.
+Scores are computed at query time and used for **Top Picks** and the **relevance** sort. Each part that fires adds a reason, shown on the card — _"PUP is a favorite"_, _"Movements shares fans with Joyce Manor & Modern Baseball (≈ PUP)"_ — and highlighted genre tags.
 
-1. **Manual weights (Layer 1)** — in Settings, weight your genres 1–5. An event's base score is the sum of the weights of the genres it matches.
-2. **Behavioral learning (Layer 2)** — when you mark an event _Interested_, its genre tags and artist become signals. Matching events get a boost equal to the summed signal counts, **decayed** by the number of weeks since each signal was last seen (divisor floored at 1).
+| Signal | What it does | Points |
+| --- | --- | --- |
+| **Favorite artists** | A favorite on the bill (Settings → Favorite Artists, weighted 1–5). Never decays. | headlining 12–20, opening 6–10 |
+| **Starred artists** | The headliner of any event you've marked _Interested_ counts like a lighter favorite. | 8 / 4 |
+| **Sounds like** | A lineup act is similar to a favorite or starred artist (see below). | up to 9 (half for openers) |
+| **Genre weights** | Your genre weights (1–5) vs. the event's tags — the source's own plus genres looked up for the lineup. Matching is whole-word and one-way: a `punk` weight matches `pop punk`, but `indie rock` doesn't match plain `rock`. Best match + ½·second + ¼·third, so a pile of loose tags can't beat a square fit. | up to ~8.75 |
+| **Learned tags** | Genre tags from events you star, fading with an 8-week half-life. | up to 4 |
+| **Penalties** | Another show by a headliner you've hidden (−6); tribute acts (−3). | |
 
-**Taste-profile seeding:** if a `taste-profile.json` exists at the repo root (this one was derived from the owner's Spotify top artists/tracks), it's imported idempotently on startup — its genres become Layer-1 weights and its artists become Layer-2 signals. Guarded by the `taste_profile_applied` setting; bump `generated_at` in the JSON to re-import, or delete the file to opt out.
+**Lineups.** Scraped listings are just titles — _"Tractor Presents: Bob Sumner w/ Laith & The Texas Birds, Birdie Fenn Cent @ The Sunset Tavern"_ — so every event's bill is parsed out of its title (`src/lineup.js`): promoter prefixes, tour names, venue suffixes, "SOLD OUT!" and similar noise are stripped, and `w/`, `x`, `•`, `//` and friends split the acts. Sources with structured data (Ticketmaster attractions, VenuePilot, Bandsintown) supply the lineup directly.
+
+**Artist enrichment** runs after each refresh (`src/enrich/`), within a budget of API calls (`ENRICH_MAX_LOOKUPS`), everything cached in SQLite:
+
+1. Favorite and starred artists are looked up on [MusicBrainz](https://musicbrainz.org/), and their similar artists fetched from [ListenBrainz](https://listenbrainz.org/) (derived from real listening sessions — PUP → Jeff Rosenstock, Joyce Manor, Modern Baseball…).
+2. Upcoming headliners get genre tags from MusicBrainz, then their own similar lists, then support acts get tags — soonest shows first.
+3. Tags are rolled up onto each event (`events.artist_tags`).
+
+**Sounds like** compares each artist's similar-artist list with each favorite's, by cosine similarity with inverse-document-frequency weighting. That catches direct links (an act on a favorite's list) and shared-fan links (Movements' listeners also play Joyce Manor and Modern Baseball, both close to PUP), while hub artists that sit on every list — Radiohead, The Beatles — count for little.
+
+**Top Picks** shows the best-scoring events in the next 30 days, plus a **Your Artists** section: every show by a favorite or starred artist in the next year, since those tours announce months ahead.
+
+**Taste-profile seeding:** if a `taste-profile.json` exists at the repo root (this one was derived from the owner's Spotify top artists/tracks), it's imported idempotently on startup — its genres become genre weights and its artists become favorite artists. Guarded by settings keyed to `generated_at`; bump it in the JSON to re-import, or delete the file to opt out.
 
 ---
 
@@ -242,7 +269,7 @@ For when you want richer, plain-English filtering than the built-in controls —
 
 What happens:
 
-1. The command runs `npm run export-events`, dumping upcoming events to `data/events-export.json` (id, title, venue, date, genres, price, and EventLight's own preference score).
+1. The command runs `npm run export-events`, dumping upcoming events to `data/events-export.json` (id, title, lineup, venue, date, genres, price, and EventLight's own preference score with its reasons).
 2. Claude reads that file, selects and **ranks** the events that match your request, and writes `data/curated.json` — each pick with a one-line reason.
 3. Open the **Curated** tab in the dashboard (or refresh it) to see the ranked picks with Claude's reasoning. Interested/Hide work there like any other view.
 
@@ -259,6 +286,8 @@ src/
   routes/          Express handlers (events, settings, refresh, status, discover)
   scheduler/       node-cron job + manual triggers
   scoring/         preference engine
+  enrich/          artist genres (MusicBrainz) + similar artists (ListenBrainz)
+  lineup.js        parse the bill (headliner, support) out of an event title
   cli/             refresh + export-events commands
   discovery.js     paste-a-URL source auto-discovery (RSS/iCal/JSON-LD/scrape)
   public/          frontend (HTML, CSS, vanilla JS + Alpine.js, vendored)
@@ -281,7 +310,7 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | --- | --- | --- |
 | `GET` | `/api/views/tonight` | Today's events |
 | `GET` | `/api/views/week` | This week, grouped by day |
-| `GET` | `/api/views/top-picks` | Highest-scored events, next 30 days |
+| `GET` | `/api/views/top-picks` | Highest-scored events, next 30 days, plus `artists`: favorite/starred artists' shows in the next year |
 | `GET` | `/api/views/curated` | The `/curate` routine's ranked picks (from `data/curated.json`) |
 | `GET` | `/api/views/month?month=YYYY-MM` | Calendar counts + events |
 | `GET` | `/api/events` | Paginated, filterable, sortable list |
@@ -291,7 +320,9 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `GET` | `/api/filters` | Distinct cities, sources, tags |
 | `GET` | `/api/status` | Last run per source + scheduler state |
 | `POST` | `/api/refresh` | Run all adapters now |
-| `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `eventbrite`, `bandsintown`, `rss`, `scraper`) |
+| `POST` | `/api/refresh/:adapter` | Run one adapter (`ticketmaster`, `eventbrite`, `bandsintown`, `rss`, `scraper`) or the `enrich` step |
+| `POST` | `/api/settings/artists` | Add or re-weight a favorite artist (`{ name, weight }`) |
+| `DELETE` | `/api/settings/artists/:key` | Remove a favorite artist |
 | `POST` | `/api/discover` | Probe a venue URL for RSS/iCal/JSON-LD, falling back to a scraper template |
 | `POST` | `/api/discover/add` | Save a discovered source to `feeds.json` / `scrapers.json` |
 | `GET` | `/api/export/ics` | Download interested events as `.ics` |
@@ -306,7 +337,7 @@ All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInter
 npm test
 ```
 
-Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation, and the `.ics` builder.
+Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, and the `.ics` builder.
 
 ---
 

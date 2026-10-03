@@ -21,6 +21,42 @@
       "category": "comedy",
       "enabled": true,
       "note": "Same platform as Tacoma Comedy Club — full schema.org Event JSON-LD on the homepage (137 events at verification, 2026-07)."
+    },
+    {
+      "id": "conor-byrne",
+      "name": "Conor Byrne Pub",
+      "url": "https://www.conorbyrnepub.com/events",
+      "type": "venuepilot",
+      "accountId": 194,
+      "city": "Seattle",
+      "venue": "Conor Byrne Pub",
+      "category": "music",
+      "enabled": true,
+      "note": "VenuePilot widget (JS-rendered, not scrapeable) — read from VenuePilot's public events API instead; accountId is in the page's venuepilotSettings. Verified 2026-10 (80 events)."
+    },
+    {
+      "id": "jazzbones",
+      "name": "Jazzbones",
+      "url": "https://www.jazzbones.com/",
+      "type": "venuepilot",
+      "accountId": 3334,
+      "city": "Tacoma",
+      "venue": "Jazzbones",
+      "category": "music",
+      "enabled": true,
+      "note": "VenuePilot widget — read from VenuePilot's public events API (replaces the old scraper, whose selectors never matched the widget). Verified 2026-10."
+    },
+    {
+      "id": "tracyton-movie-house",
+      "name": "Tracyton Movie House",
+      "url": "https://www.tracytonmoviehouse.com/events",
+      "type": "venuepilot",
+      "accountId": 2551,
+      "city": "Bremerton",
+      "venue": "Tracyton Movie House",
+      "category": "music",
+      "enabled": true,
+      "note": "VenuePilot widget (The Redwood Theater) — read from VenuePilot's public events API. Verified 2026-10."
     }
   ]
 }

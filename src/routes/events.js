@@ -15,7 +15,7 @@ import {
   getDistinctSources,
   getAllTags,
 } from '../db/queries.js';
-import { scoreEvents, scoreAndRank } from '../scoring/engine.js';
+import { scoreEvents, scoreAndRank, hasArtistMatch } from '../scoring/engine.js';
 
 const router = express.Router();
 
@@ -120,12 +120,23 @@ router.get('/views/week', (req, res) => {
 });
 
 // ── View: Top Picks (highest scored, next 30 days) ───────────────────────
+// Also returns `artists`: shows by your favorite or starred artists over the
+// next year — tours announce months out, and those are the ones that sell out.
 router.get('/views/top-picks', (req, res) => {
   const today = todayISO();
-  const filters = { ...parseFilters(req.query), dateFrom: today, dateTo: addDays(today, 30) };
+  const to = addDays(today, 30);
   const limit = Math.min(100, parseInt(req.query.limit, 10) || 50);
-  const events = scoreAndRank(queryEvents(filters)).slice(0, limit);
-  res.json({ from: today, to: addDays(today, 30), events });
+  const scored = scoreEvents(
+    queryEvents({ ...parseFilters(req.query), dateFrom: today, dateTo: addDays(today, 365) }, { sort: 'date' })
+  );
+
+  const artists = scored.filter(hasArtistMatch).slice(0, 30);
+  const shown = new Set(artists.map((e) => e.id));
+  const events = scored
+    .filter((e) => e.date <= to && e._score > 0 && !shown.has(e.id))
+    .sort((a, b) => b._score - a._score || String(a.date).localeCompare(String(b.date)))
+    .slice(0, limit);
+  res.json({ from: today, to, artists, events });
 });
 
 // ── View: Curated (produced by the /curate Claude Code routine) ──────────

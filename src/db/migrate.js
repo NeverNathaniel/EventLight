@@ -4,16 +4,31 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import db from './index.js';
 import { applyTasteProfile } from './applyTasteProfile.js';
+import { parseLineup } from '../lineup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function migrate() {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(schema);
+  backfillLineups();
   seedDefaults();
   // One-off Spotify taste import (idempotent; no-op once applied).
   applyTasteProfile();
   return db;
+}
+
+// Events stored before lineup parsing existed get one parsed from their title.
+function backfillLineups() {
+  const rows = db.prepare("SELECT id, title, artist FROM events WHERE lineup = '[]'").all();
+  if (!rows.length) return;
+  const update = db.prepare('UPDATE events SET lineup = ? WHERE id = ?');
+  db.transaction(() => {
+    for (const r of rows) {
+      const lineup = parseLineup(r.title, { artist: r.artist });
+      if (lineup.length) update.run(JSON.stringify(lineup), r.id);
+    }
+  })();
 }
 
 // Seed a starter set of manual genres (weight 3) the first time only, so the

@@ -32,7 +32,7 @@
     <!-- ADD A VENUE BY URL -->
     <section class="settings-section">
       <h2>Add a Venue by URL</h2>
-      <p class="desc">Paste a venue's website. EventLight checks for an RSS feed, then an iCal feed, then embedded event data (JSON-LD) — and only falls back to scraping if none of those exist.</p>
+      <p class="desc">Paste a venue's website. EventLight checks for a VenuePilot ticketing widget, an RSS feed, an iCal feed, then embedded event data (JSON-LD) — and only falls back to scraping if none of those exist.</p>
       <div class="row">
         <input type="url" class="grow" x-model="discover.url" placeholder="https://venue.com" @keydown.enter="runDiscover()" />
         <button class="btn btn-accent" @click="runDiscover()" :disabled="discover.busy" x-text="discover.busy ? 'Checking…' : 'Discover'"></button>
@@ -92,10 +92,39 @@
       </div>
     </section>
 
+    <!-- FAVORITE ARTISTS -->
+    <section class="settings-section">
+      <h2>Favorite Artists</h2>
+      <p class="desc">The strongest signal. When a favorite is on a bill — headlining or opening — it's a pick, however far out the show is. EventLight also looks up who sounds like your favorites (via ListenBrainz) and boosts those shows, so the more favorites you add, the better the discovery.</p>
+      <template x-if="data.enrichment">
+        <p class="desc" style="color:var(--accent)" x-show="data.enrichment.similar > 0">
+          ≈ <span x-text="data.enrichment.similar"></span> related artists found · <span x-text="data.enrichment.artists"></span> artists tagged with genres. New favorites are looked up on the next refresh.
+        </p>
+      </template>
+      <template x-for="a in data.artists" :key="a.artist_key">
+        <div class="row">
+          <div class="grow">
+            <div class="name" x-text="a.name"></div>
+            <div class="sub" x-show="a.source !== 'manual'" x-text="'from ' + a.source"></div>
+          </div>
+          <div class="weight-pills">
+            <template x-for="w in [1,2,3,4,5]" :key="w">
+              <button :class="{ on: a.weight===w }" @click="setArtistWeight(a, w)" x-text="w"></button>
+            </template>
+          </div>
+          <button class="btn btn-ghost btn-danger" @click="delArtist(a.artist_key)">Remove</button>
+        </div>
+      </template>
+      <div class="row">
+        <input type="text" class="grow" x-model="newArtist" placeholder="Add an artist, e.g. Jeff Rosenstock" @keydown.enter="addArtist()" />
+        <button class="btn" @click="addArtist()">Add artist</button>
+      </div>
+    </section>
+
     <!-- GENRE WEIGHTS -->
     <section class="settings-section">
       <h2>Genre Weights</h2>
-      <p class="desc">Layer 1 of the preference engine. Each genre you weight (1–5) boosts matching events in Top Picks and the relevance sort.</p>
+      <p class="desc">Each genre you weight (1–5) boosts matching events in Top Picks and the relevance sort. Events are matched on their listed genres plus genres looked up for the artists on the bill, so scraped shows count too. A weight matches more specific tags ("punk" matches "pop punk"), not broader ones.</p>
       <template x-for="g in data.genres" :key="g.genre">
         <div class="row">
           <div class="grow"><div class="name" x-text="g.genre"></div></div>
@@ -116,7 +145,7 @@
     <!-- LEARNED SIGNALS -->
     <section class="settings-section">
       <h2>Learned Signals</h2>
-      <p class="desc">Layer 2 — tags and artists picked up from events you mark Interested. These decay over time and boost similar events automatically.</p>
+      <p class="desc">Genre tags picked up from events you mark Interested (fading with an 8-week half-life), plus the artists themselves, which count like favorites. Hiding an event gently demotes other shows by the same headliner.</p>
       <template x-if="data.tasteProfile && data.tasteProfile.applied">
         <p class="sub" style="color:var(--accent)">
           ♫ Seeded from your Spotify taste profile — <span x-text="data.tasteProfile.artists"></span> artists, <span x-text="data.tasteProfile.genres"></span> genres (<span x-text="data.tasteProfile.generated_at"></span>).

@@ -3,14 +3,15 @@ function settings() {
   return {
     data: {
       apiKeys: { ticketmaster: false, bandsintown: false, eventbrite: false },
-      headless: true, cron: '', genres: [], preferences: [], tasteProfile: null, feeds: [], scrapers: [],
+      headless: true, cron: '', genres: [], artists: [], enrichment: null, preferences: [], tasteProfile: null, feeds: [], scrapers: [],
     },
     status: { sources: [] },
     keys: { ticketmaster: '', bandsintown: '', eventbrite: '' },
     newGenre: '',
+    newArtist: '',
     newFeed: { name: '', url: '', type: 'rss', venue: '', city: '', category: 'music' },
     newScraper: { name: '', url: '', city: '', item: '', name_sel: '', date_sel: '', link_sel: '' },
-    adapters: ['ticketmaster', 'eventbrite', 'bandsintown', 'rss', 'scraper'],
+    adapters: ['ticketmaster', 'eventbrite', 'bandsintown', 'rss', 'scraper', 'enrich'],
     discover: { url: '', busy: false, result: null, error: null, adding: false },
     busy: false,
     toast: '',
@@ -53,7 +54,7 @@ function settings() {
       }
     },
     methodLabel(m) {
-      return { rss: 'RSS feed', ical: 'iCal feed', jsonld: 'Structured data', scrape: 'Scraper' }[m] || m;
+      return { venuepilot: 'VenuePilot feed', rss: 'RSS feed', ical: 'iCal feed', jsonld: 'Structured data', scrape: 'Scraper' }[m] || m;
     },
     discoverSummary(res) {
       const rec = res.recommended;
@@ -79,6 +80,24 @@ function settings() {
       this.keys = { ticketmaster: '', bandsintown: '', eventbrite: '' };
       await this.reload();
       this.flash('API keys saved.');
+    },
+
+    // ── favorite artists ─────────────────────────────────────────────────────
+    async setArtistWeight(a, weight) {
+      await postJSON('/api/settings/artists', { name: a.name, weight });
+      await this.reload();
+    },
+    async addArtist() {
+      const name = this.newArtist.trim();
+      if (!name) return;
+      await postJSON('/api/settings/artists', { name, weight: 4 });
+      this.newArtist = '';
+      await this.reload();
+      this.flash(`${name} added — similar artists are looked up on the next refresh.`);
+    },
+    async delArtist(key) {
+      await fetch(`/api/settings/artists/${encodeURIComponent(key)}`, { method: 'DELETE' });
+      await this.reload();
     },
 
     // ── genres ─────────────────────────────────────────────────────────────

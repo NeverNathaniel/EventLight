@@ -6,9 +6,10 @@ import ical from 'node-ical';
 import { readFeeds } from '../configFiles.js';
 import { REQUEST_DELAY_MS, sleep } from '../config.js';
 import { fetchJsonLdEvents } from '../discovery.js';
+import { fetchVenuePilotEvents } from './venuepilot.js';
 import { classify, toISODate, toTime, clean } from './util.js';
 
-export const meta = { id: 'rss', source: 'rss', label: 'RSS / iCal / JSON-LD feeds' };
+export const meta = { id: 'rss', source: 'rss', label: 'RSS / iCal / JSON-LD / VenuePilot feeds' };
 
 const parser = new Parser({ timeout: 20000 });
 
@@ -57,7 +58,9 @@ async function runFeed(feed) {
   const source_name = feed.id || feed.name;
   try {
     let events = [];
-    if (feed.type === 'jsonld') {
+    if (feed.type === 'venuepilot') {
+      events = await fetchVenuePilotEvents(feed);
+    } else if (feed.type === 'jsonld') {
       // Schema.org Event data embedded in a venue page (discovered via URL).
       const found = await fetchJsonLdEvents(feed.url);
       events = found
@@ -83,7 +86,8 @@ async function runFeed(feed) {
         .map((item) => mapRssItem(item, feed))
         .filter((m) => m.date);
     }
-    return { source: 'rss', source_name, status: 'ok', events };
+    // An RSS feed carries only its latest posts; the other types are full calendars.
+    return { source: 'rss', source_name, status: 'ok', events, complete: feed.type !== 'rss' && Boolean(feed.type) };
   } catch (err) {
     return {
       source: 'rss',
