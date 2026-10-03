@@ -1,6 +1,8 @@
 // Prepared statements and higher-level query helpers.
 import db from './index.js';
 import { safeHttpUrl } from '../adapters/util.js';
+import { parseLineup, artistKey } from '../lineup.js';
+import { HOME_CITY, HOME_BOOST } from '../config.js';
 
 // ── Normalisation / dedupe ──────────────────────────────────────────────
 function norm(s) {
@@ -24,12 +26,12 @@ const selectByKey = db.prepare('SELECT id FROM events WHERE dedupe_key = ?');
 const insertEvent = db.prepare(`
   INSERT INTO events
     (dedupe_key, source, source_name, title, artist, venue, city, date, time,
-     doors_time, category, genre_tags, ticket_url, image_url, price_range,
-     interested, hidden, created_at, updated_at)
+     doors_time, category, genre_tags, ticket_url, image_url, price_range, lineup,
+     headliner_key, interested, hidden, created_at, updated_at)
   VALUES
     (@dedupe_key, @source, @source_name, @title, @artist, @venue, @city, @date, @time,
-     @doors_time, @category, @genre_tags, @ticket_url, @image_url, @price_range,
-     @interested, @hidden, datetime('now'), datetime('now'))
+     @doors_time, @category, @genre_tags, @ticket_url, @image_url, @price_range, @lineup,
+     @headliner_key, @interested, @hidden, datetime('now'), datetime('now'))
 `);
 
 // Re-ingestion refreshes mutable fields but preserves user state (interested/hidden).
@@ -38,9 +40,17 @@ const updateEvent = db.prepare(`
     source = @source, source_name = @source_name, title = @title, artist = @artist,
     venue = @venue, city = @city, date = @date, time = @time, doors_time = @doors_time,
     category = @category, genre_tags = @genre_tags, ticket_url = @ticket_url,
-    image_url = @image_url, price_range = @price_range, updated_at = datetime('now')
+    image_url = @image_url, price_range = @price_range, lineup = @lineup,
+    headliner_key = @headliner_key, updated_at = datetime('now')
   WHERE dedupe_key = @dedupe_key
 `);
+
+// Identifies a show across sources: the same headliner on the same date.
+// Events with no parsed act (trivia, open mics) get none, so two venues'
+// "Open Mic" nights never count as one show.
+export function headlinerKey(lineup) {
+  return (lineup[0] && artistKey(lineup[0])) || null;
+}
 
 // Normalise a raw adapter event into a complete row, returning null if invalid.
 function normalizeEvent(raw) {
@@ -52,12 +62,17 @@ function normalizeEvent(raw) {
   const category = ['music', 'comedy'].includes((raw.category || '').toLowerCase())
     ? raw.category.toLowerCase()
     : 'other';
+  // Who's playing: adapters with structured data pass `lineup`; everything
+  // else is parsed from the title (plus an optional support line).
+  const lineup = Array.isArray(raw.lineup) && raw.lineup.length
+    ? raw.lineup.map((n) => String(n).trim()).filter(Boolean).slice(0, 8)
+    : parseLineup(title, { artist: raw.artist, support: raw.support });
   return {
     dedupe_key: dedupeKey(title, date, venue),
     source: raw.source || 'api',
     source_name: raw.source_name || raw.source || 'unknown',
     title,
-    artist: raw.artist || null,
+    artist: raw.artist || lineup[0] || null,
     venue,
     city: raw.city || null,
     date,
@@ -72,6 +87,8 @@ function normalizeEvent(raw) {
     ticket_url: safeHttpUrl(raw.ticket_url),
     image_url: safeHttpUrl(raw.image_url),
     price_range: raw.price_range || null,
+    lineup: JSON.stringify(lineup),
+    headliner_key: headlinerKey(lineup),
     interested: 0,
     hidden: 0,
   };
@@ -103,6 +120,29 @@ export const upsertEvents = db.transaction((rawList) => {
   }
   return { found: rawList.length, added, updated, invalid };
 });
+
+// Drop upcoming listings a source no longer shows (cancelled, moved, or a
+// re-labelled venue), after a complete, successful run of that source.
+//   - Today's shows are kept: venues often drop a show from the calendar the
+//     day of, or once doors open.
+//   - Rows you starred or hid are kept so your choices aren't lost.
+//   - If a run would remove more than 40% of the source's upcoming shows, it's
+//     far more likely the scrape broke than that the venue cancelled half its
+//     calendar — nothing is removed. Returns the number of rows deleted.
+const MAX_PRUNE_SHARE = 0.4;
+export function pruneStaleEvents(source, sourceName, runStartedAt, today) {
+  const where = `source = @source AND source_name = @sourceName AND date > @today`;
+  const params = { source, sourceName, today, runStartedAt };
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM events WHERE ${where}`).get(params).n;
+  const staleWhere = `${where} AND updated_at < @runStartedAt AND interested = 0 AND hidden = 0`;
+  const stale = db.prepare(`SELECT COUNT(*) AS n FROM events WHERE ${staleWhere}`).get(params).n;
+  if (!stale || stale > Math.max(3, total * MAX_PRUNE_SHARE)) return 0;
+  return db.prepare(`DELETE FROM events WHERE ${staleWhere}`).run(params).changes;
+}
+
+export function dbNow() {
+  return db.prepare("SELECT datetime('now') AS now").get().now;
+}
 
 // ── Event listing with filters / sorting ────────────────────────────────
 function buildWhere(filters = {}) {
@@ -136,15 +176,31 @@ function buildWhere(filters = {}) {
   if (filters.onlyInterested) {
     clauses.push('interested = 1');
   }
+  // The same show listed by two sources (a venue's calendar and Ticketmaster,
+  // under slightly different titles and venue names) is listed once. The
+  // copy you starred wins, then the venue's own listing over an API's, then
+  // the older row. Same-source twins (matinee + evening) are separate shows.
+  // Skipped when filtering by source, so each source still shows everything.
+  if (!filters.showDuplicates && !(Array.isArray(filters.sources) && filters.sources.length)) {
+    clauses.push(`NOT EXISTS (
+      SELECT 1 FROM events t
+      WHERE t.date = events.date AND t.headliner_key = events.headliner_key
+        AND t.source_name != events.source_name
+        AND (t.city IS NULL OR events.city IS NULL OR t.city = events.city)
+        AND (t.interested > events.interested
+          OR (t.interested = events.interested AND (t.source = 'api') < (events.source = 'api'))
+          OR (t.interested = events.interested AND (t.source = 'api') = (events.source = 'api') AND t.id < events.id)))`);
+  }
   if (filters.search) {
     clauses.push('(title LIKE @search OR artist LIKE @search OR venue LIKE @search)');
     params.search = `%${filters.search}%`;
   }
-  // Genre tags: match any of the requested tags (OR).
+  // Genre tags: match any of the requested tags (OR), in the source's tags
+  // or the genres looked up for the lineup.
   if (Array.isArray(filters.genres) && filters.genres.length) {
     const sub = filters.genres.map((g, i) => {
       params[`genre${i}`] = `%${g}%`;
-      return `genre_tags LIKE @genre${i}`;
+      return `(genre_tags LIKE @genre${i} OR artist_tags LIKE @genre${i})`;
     });
     clauses.push(`(${sub.join(' OR ')})`);
   }
@@ -217,15 +273,23 @@ export function getDistinctSources() {
     .map((r) => r.source_name);
 }
 
+// Filter facets: every source tag, plus looked-up artist genres common enough
+// to be useful (on 3+ events) so the list doesn't fill with one-offs.
 export function getAllTags() {
-  const rows = db.prepare("SELECT genre_tags FROM events WHERE genre_tags != ''").all();
   const set = new Set();
-  for (const { genre_tags } of rows) {
+  for (const { genre_tags } of db.prepare("SELECT genre_tags FROM events WHERE genre_tags != ''").all()) {
     genre_tags.split(',').forEach((t) => {
       const tag = t.trim().toLowerCase();
       if (tag) set.add(tag);
     });
   }
+  const counts = new Map();
+  for (const { artist_tags } of db.prepare("SELECT artist_tags FROM events WHERE artist_tags != ''").all()) {
+    for (const t of new Set(artist_tags.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean))) {
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+  }
+  for (const [tag, n] of counts) if (n >= 3) set.add(tag);
   return [...set].sort();
 }
 
@@ -314,4 +378,14 @@ export function setSetting(key, value) {
     `INSERT INTO settings (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
   ).run(key, String(value));
+}
+
+// "Close to home": your home city and how much nearby shows are boosted (a
+// percentage). Saved in Settings; the .env values are only defaults.
+export function getHomeSetting() {
+  const boost = parseInt(getSetting('home_boost', ''), 10);
+  return {
+    city: getSetting('home_city', HOME_CITY) || '',
+    boost: Number.isFinite(boost) ? Math.max(0, Math.min(100, boost)) : HOME_BOOST,
+  };
 }

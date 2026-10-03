@@ -1,9 +1,11 @@
 // Bandsintown adapter — artist-level lookup.
 // Used to resolve upcoming shows for known artists. On a scheduled run it
-// resolves the artists the user has marked "interested" and pulls their
-// upcoming Washington-area dates, feeding the preference loop.
+// resolves your favorite artists plus the artists of events you've marked
+// "interested", and pulls their upcoming Washington-area dates — so a
+// favorite's show is found even at a venue EventLight doesn't scrape.
 import axios from 'axios';
 import db from '../db/index.js';
+import { getFavoriteArtists } from '../db/artists.js';
 import { getApiKeys, REQUEST_DELAY_MS, sleep } from '../config.js';
 import { toISODate, toTime } from './util.js';
 
@@ -19,6 +21,7 @@ function mapEvent(e, artistName) {
     source_name: 'bandsintown',
     title: e.title || artistName,
     artist: artistName,
+    lineup: Array.isArray(e.lineup) && e.lineup.length ? e.lineup : [artistName],
     venue: venue.name || 'Unknown Venue',
     city: venue.city || null,
     date: toISODate(e.datetime),
@@ -47,15 +50,26 @@ export async function lookupArtist(artistName, appId) {
     .filter((m) => m.date);
 }
 
-// Artists the user cares about: distinct, non-null artists on interested events.
-function interestedArtists() {
-  return db
-    .prepare(
-      `SELECT DISTINCT artist FROM events
-       WHERE interested = 1 AND artist IS NOT NULL AND artist != ''`
-    )
-    .all()
-    .map((r) => r.artist);
+// Artists the user cares about: favorites first, then distinct artists on
+// interested events (case-insensitively deduplicated).
+function artistsToResolve() {
+  const names = [
+    ...getFavoriteArtists().map((f) => f.name),
+    ...db
+      .prepare(
+        `SELECT DISTINCT artist FROM events
+         WHERE interested = 1 AND artist IS NOT NULL AND artist != ''`
+      )
+      .all()
+      .map((r) => r.artist),
+  ];
+  const seen = new Set();
+  return names.filter((n) => {
+    const k = n.trim().toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 export async function run() {
@@ -64,12 +78,12 @@ export async function run() {
     return { status: 'skipped', error_msg: 'No BANDSINTOWN_APP_ID set', events: [] };
   }
 
-  const artists = interestedArtists();
+  const artists = artistsToResolve();
   if (artists.length === 0) {
     return {
       status: 'ok',
       events: [],
-      note: 'No interested artists to resolve yet.',
+      note: 'No favorite or interested artists to resolve yet.',
     };
   }
 

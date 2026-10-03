@@ -3,12 +3,43 @@
 // logs each source's run to scrape_log. Adapter failures are isolated.
 import * as ticketmaster from './ticketmaster.js';
 import * as bandsintown from './bandsintown.js';
-import * as eventbrite from './eventbrite.js';
 import * as rss from './rss.js';
 import * as scraper from './scraper.js';
-import { upsertEvents, logRun } from '../db/queries.js';
+import { upsertEvents, logRun, pruneStaleEvents, dbNow } from '../db/queries.js';
+import { enrichArtists } from '../enrich/index.js';
+import { refreshCinemas } from '../cinema/index.js';
 
-export const adapters = [ticketmaster, eventbrite, bandsintown, rss, scraper];
+export const adapters = [ticketmaster, bandsintown, rss, scraper];
+
+// Cinema listings (the Movies tab) live in their own table, but refresh on the
+// same schedule and report per theater like any other source.
+export const cinemaStep = {
+  meta: { id: 'cinema', source: 'cinema', label: 'Cinemas' },
+  run: refreshCinemas,
+};
+
+// Artist enrichment isn't a source of events, but it runs on the same
+// schedule (after ingestion, so new lineups get looked up) and can be
+// re-run on its own from Settings → Maintenance like any adapter.
+export const enrichStep = {
+  meta: { id: 'enrich', source: 'enrich', label: 'Artist enrichment' },
+  async run() {
+    const r = await enrichArtists();
+    return {
+      runs: [
+        {
+          source: 'enrich',
+          source_name: 'artist-enrichment',
+          status: r.status,
+          events: [],
+          error_msg: r.error_msg || null,
+          // Logged as found = artists looked up, added = artists matched.
+          counts: { found: r.lookups || 0, added: r.found || 0 },
+        },
+      ],
+    };
+  },
+};
 
 // Normalise any adapter result into a flat array of per-source runs.
 function toRuns(adapter, result) {
@@ -24,12 +55,27 @@ function toRuns(adapter, result) {
   ];
 }
 
+// Runs flagged `complete` (a scraped calendar page, an iCal/JSON-LD/VenuePilot
+// feed) list a venue's whole calendar, so a show missing from a successful run
+// really is gone. API results (paged, capped) and RSS (only the latest posts)
+// never set it — absence there proves nothing.
+const MIN_EVENTS_TO_PRUNE = 5; // a near-empty scrape is more likely breakage
+
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // Ingest a single run's events and write its log row. Returns a summary.
-function ingestRun(run) {
-  let counts = { found: 0, added: 0, updated: 0, invalid: 0 };
+function ingestRun(run, startedAt) {
+  let counts = { found: 0, added: 0, updated: 0, invalid: 0, ...run.counts };
+  let pruned = 0;
   if (run.status === 'ok' && run.events.length) {
     counts = upsertEvents(run.events);
-  } else {
+    if (run.complete && run.events.length >= MIN_EVENTS_TO_PRUNE) {
+      pruned = pruneStaleEvents(run.source, run.source_name, startedAt, localToday());
+    }
+  } else if (!run.counts) {
     counts.found = run.events?.length || 0;
   }
 
@@ -49,6 +95,7 @@ function ingestRun(run) {
     found: counts.found,
     added: counts.added,
     updated: counts.updated,
+    pruned,
     error_msg: run.error_msg || null,
   };
 }
@@ -56,10 +103,11 @@ function ingestRun(run) {
 // Run a single adapter by id (used by the on-demand refresh of one source).
 export async function runAdapter(adapter) {
   const summaries = [];
+  const startedAt = dbNow(); // same clock and format as events.updated_at
   try {
     const result = await adapter.run();
     for (const run of toRuns(adapter, result)) {
-      summaries.push(ingestRun(run));
+      summaries.push(ingestRun(run, startedAt));
     }
   } catch (err) {
     // Last-resort guard: an adapter that throws still logs and continues.
@@ -82,11 +130,12 @@ export async function runAdapter(adapter) {
   return summaries;
 }
 
-// Run every adapter sequentially. Returns a flat list of run summaries.
+// Run every adapter sequentially, then enrich the new lineups. Returns a flat
+// list of run summaries.
 export async function runAll() {
   const startedAt = new Date().toISOString();
   const results = [];
-  for (const adapter of adapters) {
+  for (const adapter of [...adapters, cinemaStep, enrichStep]) {
     const summaries = await runAdapter(adapter);
     results.push(...summaries);
     const label = adapter.meta.label;
@@ -101,5 +150,5 @@ export async function runAll() {
 
 // Look up an adapter module by its meta id.
 export function getAdapterById(id) {
-  return adapters.find((a) => a.meta.id === id) || null;
+  return [...adapters, cinemaStep, enrichStep].find((a) => a.meta.id === id) || null;
 }

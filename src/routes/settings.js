@@ -9,9 +9,29 @@ import {
   queryEvents,
   getPreferences,
   getSetting,
+  setSetting,
+  getHomeSetting,
+  getDistinctCities,
 } from '../db/queries.js';
+import { BOOST_LEVELS, knownCities, cityKey } from '../scoring/home.js';
+import {
+  getAlertSettings,
+  saveAlertSettings,
+  checkArtistAlerts,
+  sendDigest,
+  sendTest,
+  digestScheduleLabel,
+} from '../alerts/index.js';
+import { parseTopic } from '../alerts/ntfy.js';
 import { readFeeds, writeFeeds, readScrapers, writeScrapers } from '../configFiles.js';
 import { readTasteProfile } from '../db/applyTasteProfile.js';
+import {
+  getFavoriteArtists,
+  setFavoriteArtist,
+  deleteFavoriteArtist,
+  countSimilarArtists,
+  countEnrichedArtists,
+} from '../db/artists.js';
 import { updateEnv } from '../envFile.js';
 import { getApiKeys, HEADLESS, REFRESH_CRON } from '../config.js';
 import { buildIcs } from '../ics.js';
@@ -29,6 +49,22 @@ function tasteProfileInfo() {
   };
 }
 
+// Cities to offer as "home": every city with listings plus every city the
+// distance table knows, one entry per city.
+function homeCityChoices() {
+  const byKey = new Map();
+  for (const c of [...getDistinctCities(), ...knownCities()]) {
+    if (!byKey.has(cityKey(c))) byKey.set(cityKey(c), c);
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function alertsInfo() {
+  const a = getAlertSettings();
+  const target = parseTopic(a.topic);
+  return { ...a, subscribeUrl: target ? `${target.server}/${target.topic}` : null, schedule: digestScheduleLabel() };
+}
+
 const router = express.Router();
 
 // ── Overview ──────────────────────────────────────────────────────────────
@@ -39,12 +75,15 @@ router.get('/settings', (req, res) => {
     apiKeys: {
       ticketmaster: Boolean(keys.ticketmaster),
       bandsintown: Boolean(keys.bandsintown),
-      eventbrite: Boolean(keys.eventbrite),
     },
     headless: HEADLESS,
     cron: REFRESH_CRON,
     genres: getManualGenres(),
+    artists: getFavoriteArtists(),
+    enrichment: { artists: countEnrichedArtists(), similar: countSimilarArtists() },
     preferences: getPreferences(),
+    home: { ...getHomeSetting(), levels: BOOST_LEVELS, cities: homeCityChoices() },
+    alerts: alertsInfo(),
     tasteProfile: tasteProfileInfo(),
     feeds: readFeeds(),
     scrapers: readScrapers(),
@@ -53,16 +92,63 @@ router.get('/settings', (req, res) => {
 
 // ── API keys (written to .env) ─────────────────────────────────────────────
 router.post('/settings/keys', (req, res) => {
-  const { ticketmaster, bandsintown, eventbrite } = req.body || {};
+  const { ticketmaster, bandsintown } = req.body || {};
   const updates = {};
   if (ticketmaster !== undefined) updates.TICKETMASTER_API_KEY = ticketmaster;
   if (bandsintown !== undefined) updates.BANDSINTOWN_APP_ID = bandsintown;
-  if (eventbrite !== undefined) updates.EVENTBRITE_API_KEY = eventbrite;
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: 'No keys provided' });
   }
   updateEnv(updates);
   res.json({ ok: true });
+});
+
+// ── Close to home ──────────────────────────────────────────────────────────
+router.post('/settings/home', (req, res) => {
+  const { city, boost } = req.body || {};
+  if (city !== undefined) {
+    const name = String(city).trim();
+    if (name.length > 60) return res.status(400).json({ error: 'City name too long' });
+    setSetting('home_city', name);
+  }
+  if (boost !== undefined) {
+    const level = BOOST_LEVELS.find((l) => l.value === Number(boost));
+    if (!level) return res.status(400).json({ error: 'Unknown boost level' });
+    setSetting('home_boost', level.value);
+  }
+  res.json({ home: getHomeSetting() });
+});
+
+// ── Alerts (ntfy push) ─────────────────────────────────────────────────────
+// Saving a new topic sends the "alerts are on" message right away, so you
+// know the phone is subscribed.
+router.post('/settings/alerts', async (req, res) => {
+  const { topic, artists, digest } = req.body || {};
+  const error = saveAlertSettings({ topic, artists, digest });
+  if (error) return res.status(400).json({ error });
+  let sent = null;
+  try {
+    sent = await checkArtistAlerts();
+  } catch (err) {
+    return res.json({ alerts: alertsInfo(), error: `Saved, but the alert didn't go out: ${err.message}` });
+  }
+  res.json({ alerts: alertsInfo(), sent });
+});
+
+router.post('/alerts/test', async (req, res) => {
+  try {
+    res.json(await sendTest());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/alerts/digest', async (req, res) => {
+  try {
+    res.json(await sendDigest({ force: true }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ── Manual genre weights ───────────────────────────────────────────────────
@@ -80,6 +166,20 @@ router.post('/settings/genres', (req, res) => {
 router.delete('/settings/genres/:genre', (req, res) => {
   deleteManualGenre(req.params.genre);
   res.json({ genres: getManualGenres() });
+});
+
+// ── Favorite artists ───────────────────────────────────────────────────────
+// Similar artists for a new favorite are fetched on the next refresh.
+router.post('/settings/artists', (req, res) => {
+  const { name, weight } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'name is required' });
+  setFavoriteArtist(String(name).slice(0, 120), weight);
+  res.json({ artists: getFavoriteArtists() });
+});
+
+router.delete('/settings/artists/:key', (req, res) => {
+  deleteFavoriteArtist(req.params.key);
+  res.json({ artists: getFavoriteArtists() });
 });
 
 // ── Feed management (feeds.json) ───────────────────────────────────────────

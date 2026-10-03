@@ -1,8 +1,10 @@
 // Scheduled ingestion via node-cron. Runs all adapters on REFRESH_CRON
-// (default every 6 hours) and guards against overlapping runs.
+// (default every 6 hours) and guards against overlapping runs. Alerts for new
+// shows go out after each refresh; the Top Picks digest has its own schedule.
 import cron from 'node-cron';
 import { runAll, runAdapter, getAdapterById } from '../adapters/index.js';
-import { REFRESH_CRON, REFRESH_ON_START } from '../config.js';
+import { REFRESH_CRON, REFRESH_ON_START, DIGEST_CRON } from '../config.js';
+import { runAlerts, sendDigest } from '../alerts/index.js';
 
 const state = {
   running: false,
@@ -24,6 +26,7 @@ export async function triggerRefresh() {
   state.lastStartedAt = new Date().toISOString();
   try {
     const summary = await runAll();
+    summary.alerts = await runAlerts();
     state.lastSummary = summary;
     return summary;
   } finally {
@@ -48,6 +51,14 @@ export async function triggerAdapter(id) {
 }
 
 export function startScheduler() {
+  if (cron.validate(DIGEST_CRON)) {
+    cron.schedule(DIGEST_CRON, () => {
+      sendDigest().catch((err) => console.error('[alerts] digest failed:', err.message));
+    });
+  } else {
+    console.warn(`[scheduler] Invalid DIGEST_CRON "${DIGEST_CRON}"; weekly digest disabled.`);
+  }
+
   if (!cron.validate(REFRESH_CRON)) {
     console.warn(`[scheduler] Invalid REFRESH_CRON "${REFRESH_CRON}"; scheduler disabled.`);
     return;

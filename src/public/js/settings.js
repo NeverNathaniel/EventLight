@@ -2,15 +2,18 @@
 function settings() {
   return {
     data: {
-      apiKeys: { ticketmaster: false, bandsintown: false, eventbrite: false },
-      headless: true, cron: '', genres: [], preferences: [], tasteProfile: null, feeds: [], scrapers: [],
+      apiKeys: { ticketmaster: false, bandsintown: false },
+      headless: true, cron: '', genres: [], artists: [], enrichment: null, preferences: [], tasteProfile: null, feeds: [], scrapers: [],
+      home: { city: '', boost: 0, levels: [], cities: [] },
+      alerts: { topic: '', artists: true, digest: true, subscribeUrl: null, schedule: '' },
     },
     status: { sources: [] },
-    keys: { ticketmaster: '', bandsintown: '', eventbrite: '' },
+    keys: { ticketmaster: '', bandsintown: '' },
     newGenre: '',
+    newArtist: '',
     newFeed: { name: '', url: '', type: 'rss', venue: '', city: '', category: 'music' },
     newScraper: { name: '', url: '', city: '', item: '', name_sel: '', date_sel: '', link_sel: '' },
-    adapters: ['ticketmaster', 'eventbrite', 'bandsintown', 'rss', 'scraper'],
+    adapters: ['ticketmaster', 'bandsintown', 'rss', 'scraper', 'cinema', 'enrich'],
     discover: { url: '', busy: false, result: null, error: null, adding: false },
     busy: false,
     toast: '',
@@ -53,7 +56,7 @@ function settings() {
       }
     },
     methodLabel(m) {
-      return { rss: 'RSS feed', ical: 'iCal feed', jsonld: 'Structured data', scrape: 'Scraper' }[m] || m;
+      return { venuepilot: 'VenuePilot feed', tribe: 'WordPress events feed', squarespace: 'Squarespace events feed', rss: 'RSS feed', ical: 'iCal feed', jsonld: 'Structured data', scrape: 'Scraper' }[m] || m;
     },
     discoverSummary(res) {
       const rec = res.recommended;
@@ -68,17 +71,62 @@ function settings() {
       try { this.status = await getJSON('/api/status'); } catch { /* non-fatal */ }
     },
 
+    // ── Close to home ──────────────────────────────────────────────────────
+    async saveHome(change) {
+      const r = await postJSON('/api/settings/home', change);
+      if (r.error || !r.home) { this.flash(r.error || 'Could not save.'); return; }
+      this.data.home = { ...this.data.home, ...r.home };
+      this.flash(r.home.boost ? `Shows near ${r.home.city} get +${r.home.boost}%.` : 'Close-to-home boost is off.');
+    },
+
+    // ── Alerts ─────────────────────────────────────────────────────────────
+    randomTopic() {
+      const bytes = crypto.getRandomValues(new Uint8Array(14));
+      return 'eventlight-' + Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+    },
+    async saveAlerts() {
+      const { topic, artists, digest } = this.data.alerts;
+      const r = await postJSON('/api/settings/alerts', { topic, artists, digest });
+      if (r.alerts) this.data.alerts = r.alerts;
+      if (r.error) { this.flash(r.error); return; }
+      if (!r.alerts) { this.flash('Could not save.'); return; }
+      this.flash(r.sent?.welcome ? 'Saved — a confirmation is on its way to your phone.' : 'Alerts saved.');
+    },
+    async alertAction(url, ok) {
+      const r = await postJSON(url, {});
+      if (r.error) { this.flash(r.error); return; }
+      this.flash(r.skipped === 'nothing to pick' ? 'Nothing to send — no picks in the next two weeks.' : ok);
+    },
+
     // ── API keys ───────────────────────────────────────────────────────────
     async saveKeys() {
       const payload = {};
-      for (const k of ['ticketmaster', 'bandsintown', 'eventbrite']) {
+      for (const k of ['ticketmaster', 'bandsintown']) {
         if (this.keys[k].trim()) payload[k] = this.keys[k].trim();
       }
       if (!Object.keys(payload).length) { this.flash('Enter at least one key.'); return; }
       await postJSON('/api/settings/keys', payload);
-      this.keys = { ticketmaster: '', bandsintown: '', eventbrite: '' };
+      this.keys = { ticketmaster: '', bandsintown: '' };
       await this.reload();
       this.flash('API keys saved.');
+    },
+
+    // ── favorite artists ─────────────────────────────────────────────────────
+    async setArtistWeight(a, weight) {
+      await postJSON('/api/settings/artists', { name: a.name, weight });
+      await this.reload();
+    },
+    async addArtist() {
+      const name = this.newArtist.trim();
+      if (!name) return;
+      await postJSON('/api/settings/artists', { name, weight: 4 });
+      this.newArtist = '';
+      await this.reload();
+      this.flash(`${name} added — similar artists are looked up on the next refresh.`);
+    },
+    async delArtist(key) {
+      await fetch(`/api/settings/artists/${encodeURIComponent(key)}`, { method: 'DELETE' });
+      await this.reload();
     },
 
     // ── genres ─────────────────────────────────────────────────────────────

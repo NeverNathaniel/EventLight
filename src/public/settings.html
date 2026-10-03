@@ -32,7 +32,7 @@
     <!-- ADD A VENUE BY URL -->
     <section class="settings-section">
       <h2>Add a Venue by URL</h2>
-      <p class="desc">Paste a venue's website. EventLight checks for an RSS feed, then an iCal feed, then embedded event data (JSON-LD) — and only falls back to scraping if none of those exist.</p>
+      <p class="desc">Paste a venue's website. EventLight checks for a VenuePilot ticketing widget, a WordPress or Squarespace events listing, an RSS feed, an iCal feed, then embedded event data (JSON-LD) — and only falls back to scraping if none of those exist.</p>
       <div class="row">
         <input type="url" class="grow" x-model="discover.url" placeholder="https://venue.com" @keydown.enter="runDiscover()" />
         <button class="btn btn-accent" @click="runDiscover()" :disabled="discover.busy" x-text="discover.busy ? 'Checking…' : 'Discover'"></button>
@@ -52,7 +52,7 @@
                     x-text="discover.adding ? 'Adding…' : ('Add as ' + methodLabel(discover.result.recommended.method))"></button>
           </div>
           <template x-if="discover.result.providers.length">
-            <p class="sub">Also detected: <span x-text="discover.result.providers.join(', ')"></span> — set the matching API key above to pull these automatically.</p>
+            <p class="sub">Also detected: <span x-text="discover.result.providers.join(', ')"></span><span x-show="discover.result.providers.includes('ticketmaster')"> — the Ticketmaster key above already covers shows it sells</span>.</p>
           </template>
           <template x-if="discover.result.recommended.sample && discover.result.recommended.sample.length">
             <div class="tags" style="margin-top:6px">
@@ -73,29 +73,53 @@
       <h2>API Keys</h2>
       <p class="desc">Stored in <code>.env</code> on this machine — never sent anywhere but the source APIs. Leave a field blank to keep the current value.</p>
       <div class="row">
-        <div class="grow"><div class="name">Ticketmaster</div><div class="sub">Discovery API consumer key</div></div>
+        <div class="grow"><div class="name">Ticketmaster</div><div class="sub">Discovery API consumer key · free, no business needed: sign up at <a href="https://developer-account.ticketmaster.com/user/register" target="_blank" rel="noopener">developer.ticketmaster.com</a> with your own name and site in the "Company" fields, then copy the Consumer Key from My Apps</div></div>
         <span class="badge" :class="data.apiKeys.ticketmaster ? 'set' : 'unset'" x-text="data.apiKeys.ticketmaster ? 'configured' : 'not set'"></span>
         <input type="password" x-model="keys.ticketmaster" placeholder="new key…" style="min-width:220px" />
       </div>
       <div class="row">
-        <div class="grow"><div class="name">Bandsintown</div><div class="sub">App ID</div></div>
+        <div class="grow"><div class="name">Bandsintown</div><div class="sub">App ID · optional; Bandsintown issues these on request, and made-up IDs are refused</div></div>
         <span class="badge" :class="data.apiKeys.bandsintown ? 'set' : 'unset'" x-text="data.apiKeys.bandsintown ? 'configured' : 'not set'"></span>
         <input type="password" x-model="keys.bandsintown" placeholder="new app id…" style="min-width:220px" />
-      </div>
-      <div class="row">
-        <div class="grow"><div class="name">Eventbrite</div><div class="sub">Private OAuth token</div></div>
-        <span class="badge" :class="data.apiKeys.eventbrite ? 'set' : 'unset'" x-text="data.apiKeys.eventbrite ? 'configured' : 'not set'"></span>
-        <input type="password" x-model="keys.eventbrite" placeholder="new token…" style="min-width:220px" />
       </div>
       <div class="row" style="justify-content:flex-end">
         <button class="btn btn-accent" @click="saveKeys()">Save keys</button>
       </div>
     </section>
 
+    <!-- FAVORITE ARTISTS -->
+    <section class="settings-section">
+      <h2>Favorite Artists</h2>
+      <p class="desc">The strongest signal. When a favorite is on a bill — headlining or opening — it's a pick, however far out the show is. EventLight also looks up who sounds like your favorites (via ListenBrainz) and boosts those shows, so the more favorites you add, the better the discovery.</p>
+      <template x-if="data.enrichment">
+        <p class="desc" style="color:var(--accent)" x-show="data.enrichment.similar > 0">
+          ≈ <span x-text="data.enrichment.similar"></span> related artists found · <span x-text="data.enrichment.artists"></span> artists tagged with genres. New favorites are looked up on the next refresh.
+        </p>
+      </template>
+      <template x-for="a in data.artists" :key="a.artist_key">
+        <div class="row">
+          <div class="grow">
+            <div class="name" x-text="a.name"></div>
+            <div class="sub" x-show="a.source !== 'manual'" x-text="'from ' + a.source"></div>
+          </div>
+          <div class="weight-pills">
+            <template x-for="w in [1,2,3,4,5]" :key="w">
+              <button :class="{ on: a.weight===w }" @click="setArtistWeight(a, w)" x-text="w"></button>
+            </template>
+          </div>
+          <button class="btn btn-ghost btn-danger" @click="delArtist(a.artist_key)">Remove</button>
+        </div>
+      </template>
+      <div class="row">
+        <input type="text" class="grow" x-model="newArtist" placeholder="Add an artist, e.g. Jeff Rosenstock" @keydown.enter="addArtist()" />
+        <button class="btn" @click="addArtist()">Add artist</button>
+      </div>
+    </section>
+
     <!-- GENRE WEIGHTS -->
     <section class="settings-section">
       <h2>Genre Weights</h2>
-      <p class="desc">Layer 1 of the preference engine. Each genre you weight (1–5) boosts matching events in Top Picks and the relevance sort.</p>
+      <p class="desc">Each genre you weight (1–5) boosts matching events in Top Picks and the relevance sort. Events are matched on their listed genres plus genres looked up for the artists on the bill, so scraped shows count too. A weight matches more specific tags ("punk" matches "pop punk"), not broader ones.</p>
       <template x-for="g in data.genres" :key="g.genre">
         <div class="row">
           <div class="grow"><div class="name" x-text="g.genre"></div></div>
@@ -113,10 +137,64 @@
       </div>
     </section>
 
+    <!-- CLOSE TO HOME -->
+    <section class="settings-section">
+      <h2>Close to Home</h2>
+      <p class="desc">Shows you'd like anyway rank higher the closer they are to home: the full boost within about 8 miles, fading to none by 18. It only scales a show's existing score, so a nearby show with no match to your taste stays out of Top Picks.</p>
+      <div class="row">
+        <div class="grow"><div class="name">Home city</div><div class="sub">Shows near it say “Close to home” on their cards</div></div>
+        <select x-model="data.home.city" @change="saveHome({ city: data.home.city })">
+          <template x-for="c in data.home.cities" :key="c"><option :value="c" x-text="c" :selected="c === data.home.city"></option></template>
+        </select>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Boost</div><div class="sub" x-text="data.home.boost ? '+' + data.home.boost + '% for shows near home' : 'off'"></div></div>
+        <div class="weight-pills wide">
+          <template x-for="l in data.home.levels" :key="l.value">
+            <button :class="{ on: data.home.boost === l.value }" @click="saveHome({ boost: l.value })" x-text="l.label"></button>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ALERTS -->
+    <section class="settings-section">
+      <h2>Alerts</h2>
+      <p class="desc">A push on your phone when a favorite or starred artist has a new show, and a weekly digest of Top Picks. Sent with <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a> — free, no account: install the ntfy app (iPhone or Android), subscribe to your topic, and save it here.</p>
+      <div class="row">
+        <div class="grow">
+          <div class="name">Topic</div>
+          <div class="sub">Anyone who knows it can read your alerts, so keep it long and random.</div>
+          <div class="sub" x-show="data.alerts.subscribeUrl">Subscribe in the app, or open <a :href="data.alerts.subscribeUrl" target="_blank" rel="noopener" x-text="data.alerts.subscribeUrl"></a></div>
+        </div>
+        <input type="text" x-model="data.alerts.topic" placeholder="eventlight-…" style="min-width:220px" />
+        <button class="btn btn-ghost" @click="data.alerts.topic = randomTopic()">Generate</button>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">New shows by your artists</div><div class="sub">Checked after every refresh; each show alerts once</div></div>
+        <div class="weight-pills wide">
+          <button :class="{ on: data.alerts.artists }" @click="data.alerts.artists = true">On</button>
+          <button :class="{ on: !data.alerts.artists }" @click="data.alerts.artists = false">Off</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="grow"><div class="name">Weekly Top Picks</div><div class="sub" x-text="data.alerts.schedule + ' · the next two weeks'"></div></div>
+        <div class="weight-pills wide">
+          <button :class="{ on: data.alerts.digest }" @click="data.alerts.digest = true">On</button>
+          <button :class="{ on: !data.alerts.digest }" @click="data.alerts.digest = false">Off</button>
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn btn-ghost" @click="alertAction('/api/alerts/test', 'Test sent — check your phone.')" :disabled="!data.alerts.subscribeUrl">Send test</button>
+        <button class="btn btn-ghost" @click="alertAction('/api/alerts/digest', 'Digest sent.')" :disabled="!data.alerts.subscribeUrl">Send digest now</button>
+        <button class="btn btn-accent" @click="saveAlerts()">Save alerts</button>
+      </div>
+    </section>
+
     <!-- LEARNED SIGNALS -->
     <section class="settings-section">
       <h2>Learned Signals</h2>
-      <p class="desc">Layer 2 — tags and artists picked up from events you mark Interested. These decay over time and boost similar events automatically.</p>
+      <p class="desc">Genre tags picked up from events you mark Interested (fading with an 8-week half-life), plus the artists themselves, which count like favorites. Hiding an event gently demotes other shows by the same headliner.</p>
       <template x-if="data.tasteProfile && data.tasteProfile.applied">
         <p class="sub" style="color:var(--accent)">
           ♫ Seeded from your Spotify taste profile — <span x-text="data.tasteProfile.artists"></span> artists, <span x-text="data.tasteProfile.genres"></span> genres (<span x-text="data.tasteProfile.generated_at"></span>).
@@ -192,7 +270,7 @@
       <p class="desc">Schedule: <code x-text="data.cron"></code> · Headless browser: <span x-text="data.headless ? 'on' : 'off (debug)'"></span></p>
 
       <div class="row">
-        <div class="grow"><div class="name">Run all sources now</div><div class="sub">Ticketmaster · Eventbrite · Bandsintown · Feeds · Scrapers</div></div>
+        <div class="grow"><div class="name">Run all sources now</div><div class="sub">Ticketmaster · Bandsintown · Feeds · Scrapers</div></div>
         <button class="btn btn-accent" @click="refreshAll()" :disabled="busy" x-text="busy ? 'Running…' : 'Refresh all'"></button>
       </div>
       <div class="row">

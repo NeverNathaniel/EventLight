@@ -14,9 +14,17 @@ const MUSIC_HINTS = [
   'hip hop', 'rap', 'punk', 'metal', 'folk', 'electronic', 'indie', 'orchestra', 'symphony',
 ];
 
+// Venue nights that aren't shows at all — trivia, movie nights, bingo… Music
+// venues list these alongside concerts, and they shouldn't count as music.
+const NOT_A_SHOW_RE =
+  /\b(?:trivia|bingo|karaoke|burles\w*|drag (?:show|brunch|bingo|night|queen)|drag and|movie night|movie|film|screening|craft|market|yoga|workshop|storytime|paint night|brewfest|beer fest|true crime|lecture|author talk|history pub)\b|karaoke|queeraroke/i;
+
 // Best-effort category from arbitrary text (title, classification, etc.).
-export function classify(text, fallback = 'other') {
+// The not-a-show check reads only the title — a comedian's bio mentioning
+// "film" or a gig blurb about "craft beer" doesn't make the show a screening.
+export function classify(text, fallback = 'other', title = text) {
   const t = String(text || '').toLowerCase();
+  if (NOT_A_SHOW_RE.test(String(title || ''))) return 'other';
   if (COMEDY_HINTS.some((h) => t.includes(h))) return 'comedy';
   if (MUSIC_HINTS.some((h) => t.includes(h))) return 'music';
   return fallback;
@@ -158,7 +166,13 @@ export function toTime(input) {
   if (isoTime) return `${isoTime[1]}:${isoTime[2]}`;
 
   // "8:00 PM" / "8 PM" / "8p.m." — \b guards keep "10 amp" from matching.
-  const ampm = str.match(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b/i);
+  // When doors and show times are both listed ("4pm doors, 5pm show"), the
+  // show time is the one that matters.
+  const showFirst = str.match(/\b(?:show|starts?|music)\b\s*(?:at|@|:)?\s*(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b/i);
+  const ampm =
+    showFirst ||
+    str.match(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b\.?\s*(?:show|start|music)\b/i) ||
+    str.match(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b/i);
   if (ampm) {
     let h = parseInt(ampm[1], 10) % 12;
     if (/p/i.test(ampm[3])) h += 12;
@@ -170,6 +184,40 @@ export function toTime(input) {
   const h24 = str.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
   if (h24) return `${pad2(parseInt(h24[1], 10))}:${h24[2]}`;
   return null;
+}
+
+// A moment as the venue's local calendar date and wall-clock time, so a
+// 7pm show is 19:00 on the right day whatever timezone the server runs in.
+// `tz` defaults to the server's own zone (TZ), like the rest of the app.
+export function zonedDateTime(when, tz) {
+  const d = when instanceof Date ? when : new Date(when);
+  if (Number.isNaN(d.getTime())) return { date: null, time: null };
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz || undefined,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    })
+      .formatToParts(d)
+      .map((p) => [p.type, p.value])
+  );
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+}
+
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', ndash: '–', mdash: '—', hellip: '…' };
+
+// Light HTML → plain text for titles and blurbs from CMS APIs ("<i>…</i>",
+// "&#8217;", "<div><br></div>").
+export function htmlToText(html) {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/(?:p|div|li|h\d)>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&([a-z]+);/gi, (m, name) => NAMED_ENTITIES[name.toLowerCase()] ?? m)
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Trim and collapse whitespace from scraped text.

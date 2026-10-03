@@ -6,11 +6,14 @@ import ical from 'node-ical';
 import { readFeeds } from '../configFiles.js';
 import { REQUEST_DELAY_MS, sleep } from '../config.js';
 import { fetchJsonLdEvents } from '../discovery.js';
+import { fetchVenuePilotEvents } from './venuepilot.js';
+import { fetchSquarespaceEvents, fetchTribeEvents } from './cms.js';
 import { classify, toISODate, toTime, clean } from './util.js';
 
-export const meta = { id: 'rss', source: 'rss', label: 'RSS / iCal / JSON-LD feeds' };
+export const meta = { id: 'rss', source: 'rss', label: 'Feeds (RSS, iCal, JSON-LD, VenuePilot, Squarespace, WordPress)' };
 
 const parser = new Parser({ timeout: 20000 });
+const FULL_CALENDAR_TYPES = new Set(['ical', 'jsonld', 'venuepilot', 'squarespace', 'tribe']);
 
 function mapRssItem(item, feed) {
   const text = `${item.title || ''} ${item.contentSnippet || ''}`;
@@ -26,7 +29,7 @@ function mapRssItem(item, feed) {
     date,
     time: toTime(item.title) || toTime(item.isoDate),
     doors_time: null,
-    category: classify(text, feed.category || 'music'),
+    category: classify(text, feed.category || 'music', item.title),
     genre_tags: feed.category ? [feed.category] : [],
     ticket_url: item.link || null,
     image_url: item.enclosure?.url || null,
@@ -45,7 +48,7 @@ function mapIcalEvent(ev, feed) {
     date: toISODate(ev.start),
     time: toTime(ev.start),
     doors_time: null,
-    category: classify(`${ev.summary || ''} ${ev.description || ''}`, feed.category || 'music'),
+    category: classify(`${ev.summary || ''} ${ev.description || ''}`, feed.category || 'music', ev.summary),
     genre_tags: feed.category ? [feed.category] : [],
     ticket_url: ev.url || null,
     image_url: null,
@@ -57,7 +60,13 @@ async function runFeed(feed) {
   const source_name = feed.id || feed.name;
   try {
     let events = [];
-    if (feed.type === 'jsonld') {
+    if (feed.type === 'venuepilot') {
+      events = await fetchVenuePilotEvents(feed);
+    } else if (feed.type === 'squarespace') {
+      events = await fetchSquarespaceEvents(feed);
+    } else if (feed.type === 'tribe') {
+      events = await fetchTribeEvents(feed);
+    } else if (feed.type === 'jsonld') {
       // Schema.org Event data embedded in a venue page (discovered via URL).
       const found = await fetchJsonLdEvents(feed.url);
       events = found
@@ -83,7 +92,9 @@ async function runFeed(feed) {
         .map((item) => mapRssItem(item, feed))
         .filter((m) => m.date);
     }
-    return { source: 'rss', source_name, status: 'ok', events };
+    // These types list a venue's whole calendar; RSS carries only its latest posts.
+    const complete = FULL_CALENDAR_TYPES.has(feed.type) && !events.truncated;
+    return { source: 'rss', source_name, status: 'ok', events, complete };
   } catch (err) {
     return {
       source: 'rss',

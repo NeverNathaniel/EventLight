@@ -1,10 +1,13 @@
 // Source auto-discovery: given a venue website URL, probe for the cleanest
 // ingestion method in order of preference:
 //
-//   1. RSS / Atom feed   (autodiscovery <link> tags, then common paths)
-//   2. iCal feed         (.ics links / webcal)
-//   3. JSON-LD           (schema.org Event structured data embedded in the page)
-//   4. Scrape            (fallback — return a ready-to-edit scraper template)
+//   1. VenuePilot        (ticketing widget with a public structured-events API)
+//   2. WordPress         (The Events Calendar plugin's REST API)
+//   3. Squarespace       (an events page's ?format=json)
+//   4. RSS / Atom feed   (autodiscovery <link> tags, then common paths)
+//   5. iCal feed         (.ics links / webcal)
+//   6. JSON-LD           (schema.org Event structured data embedded in the page)
+//   7. Scrape            (fallback — return a ready-to-edit scraper template)
 //
 // Steps 1–3 are lightweight (axios + parsing, no browser); only the fallback
 // needs Playwright at ingestion time.
@@ -12,6 +15,8 @@ import axios from 'axios';
 import Parser from 'rss-parser';
 import ical from 'node-ical';
 import { classify, toISODate, toTime, clean, absoluteUrl } from './adapters/util.js';
+import { fetchVenuePilotEvents } from './adapters/venuepilot.js';
+import { fetchSquarespaceEvents, fetchTribeEvents } from './adapters/cms.js';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
@@ -32,7 +37,14 @@ const PROVIDERS = [
   ['ticketweb', 'ticketweb.'],
   ['prekindle', 'prekindle.com'],
   ['axs', 'axs.com'],
+  ['venuepilot', 'venuepilot'],
 ];
+
+// The VenuePilot widget's account id, from the page's venuepilotSettings script.
+export function findVenuePilotAccount(html) {
+  const m = String(html || '').match(/venuepilotSettings[\s\S]{0,600}?accountIds["']?\s*:\s*\[\s*(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
 
 async function fetchHtml(url) {
   const res = await axios.get(url, {
@@ -149,7 +161,7 @@ function mapJsonLdEvent(node, baseUrl) {
     doors_time: toTime(node.doorTime),
     // No fallback here: an unclassified event stays null so the consumer
     // (e.g. a feed's configured category) can supply the default.
-    category: classify(`${typeText} ${title} ${node.description || ''}`, '') || null,
+    category: classify(`${typeText} ${title} ${node.description || ''}`, '', title) || null,
     genre_tags: [],
     ticket_url: ticketUrl ? absoluteUrl(ticketUrl, baseUrl) : null,
     image_url: image ? absoluteUrl(typeof image === 'string' ? image : image.url, baseUrl) : null,
@@ -218,16 +230,51 @@ export async function discoverSource(url) {
   const id = slugify(name) || slugify(new URL(finalUrl).hostname);
   const links = findFeedLinks(html, finalUrl);
   const providers = detectProviders(html);
-  const result = { url, finalUrl, name, providers, rss: null, ical: null, jsonld: null, recommended: null };
+  const result = { url, finalUrl, name, providers, venuepilot: null, tribe: null, squarespace: null, rss: null, ical: null, jsonld: null, recommended: null };
+
+  // 0. VenuePilot widget — the cleanest source when present (structured
+  // events with billed artists), and the widget itself can't be scraped.
+  const vpAccount = findVenuePilotAccount(html);
+  if (vpAccount) {
+    try {
+      const events = await fetchVenuePilotEvents({ accountId: vpAccount, id, name });
+      if (events.length) result.venuepilot = { accountId: vpAccount, count: events.length };
+    } catch {
+      /* fall through to the other methods */
+    }
+  }
+
+  // WordPress + The Events Calendar: the plugin's REST API lists every event.
+  if (!result.venuepilot && /wp-content|wp-json/i.test(html) && /tribe|the-events-calendar/i.test(html)) {
+    try {
+      const events = await fetchTribeEvents({ id, name, url: finalUrl });
+      if (events.length) result.tribe = { count: events.length };
+    } catch {
+      /* not available — fall through */
+    }
+  }
+
+  // Squarespace: an events page serves its listing as JSON with ?format=json.
+  if (!result.venuepilot && !result.tribe && /squarespace/i.test(html)) {
+    try {
+      const events = await fetchSquarespaceEvents({ id, name, url: finalUrl });
+      if (events.length) result.squarespace = { count: events.length };
+    } catch {
+      /* not an events page — fall through */
+    }
+  }
+
+  // A structured events API beats any feed — skip the slow path-guessing.
+  const structured = Boolean(result.venuepilot || result.tribe || result.squarespace);
 
   // 1. RSS — autodiscovery links first, then common paths.
-  for (const candidate of [...links.rss, ...RSS_PATHS.map((p) => absoluteUrl(p, finalUrl))]) {
+  for (const candidate of structured ? [] : [...links.rss, ...RSS_PATHS.map((p) => absoluteUrl(p, finalUrl))]) {
     const hit = await tryRss(candidate);
     if (hit) { result.rss = hit; break; }
   }
 
   // 2. iCal.
-  for (const candidate of [...links.ical, ...ICAL_PATHS.map((p) => absoluteUrl(p, finalUrl))]) {
+  for (const candidate of structured ? [] : [...links.ical, ...ICAL_PATHS.map((p) => absoluteUrl(p, finalUrl))]) {
     const hit = await tryIcal(candidate);
     if (hit) { result.ical = hit; break; }
   }
@@ -240,7 +287,28 @@ export async function discoverSource(url) {
 
   // Recommend the best available method.
   const base = { id, name, venue: name, city: '', category: 'music', enabled: true };
-  if (result.rss) {
+  if (result.venuepilot) {
+    result.recommended = {
+      method: 'venuepilot',
+      target: 'feeds',
+      config: { ...base, url: finalUrl, type: 'venuepilot', accountId: result.venuepilot.accountId },
+      sampleCount: result.venuepilot.count,
+    };
+  } else if (result.tribe) {
+    result.recommended = {
+      method: 'tribe',
+      target: 'feeds',
+      config: { ...base, url: new URL(finalUrl).origin, type: 'tribe' },
+      sampleCount: result.tribe.count,
+    };
+  } else if (result.squarespace) {
+    result.recommended = {
+      method: 'squarespace',
+      target: 'feeds',
+      config: { ...base, url: finalUrl, type: 'squarespace' },
+      sampleCount: result.squarespace.count,
+    };
+  } else if (result.rss) {
     result.recommended = {
       method: 'rss',
       target: 'feeds',

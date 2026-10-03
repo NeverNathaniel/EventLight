@@ -8,8 +8,11 @@
       "venue": "The Tractor Tavern",
       "category": "music",
       "enabled": true,
-      "note": "TicketWeb 'flexmedia' widget, server-rendered. Selectors verified against the live page 2026-07.",
+      "note": "TicketWeb 'flexmedia' widget, server-rendered. Selectors verified against the live page 2026-07. Tractor also books shows at the Sunset Tavern and lists them here as '… AT The Sunset'; titleVenues labels those with the right venue.",
       "waitFor": ".flexmedia--artistevents",
+      "titleVenues": {
+        "the sunset": "Sunset Tavern"
+      },
       "selectors": {
         "item": ".flexmedia--artistevents",
         "name": ".artisteventsname",
@@ -45,8 +48,8 @@
       "city": "Tacoma",
       "venue": "The Valley",
       "category": "music",
-      "enabled": true,
-      "note": "Squarespace event list, server-rendered (the old /shows path 404s). Verified 2026-07.",
+      "enabled": false,
+      "note": "Ingested via the 'the-valley' Squarespace feed in feeds.json instead (structured JSON with start times). Kept as a fallback.",
       "waitFor": ".eventlist-event",
       "selectors": {
         "item": ".eventlist-event",
@@ -65,15 +68,29 @@
       "venue": "The Showbox",
       "category": "music",
       "enabled": true,
-      "note": "AEG events list, server-rendered; covers both The Showbox and Showbox SoDo (all labelled 'The Showbox' here). Verified 2026-07.",
+      "note": "AEG events list, server-rendered; the page lists every AEG Seattle room (The Showbox, Showbox SoDo, WAMU, Climate Pledge…) plus Portland/Boise/Spokane. Items outside WA are dropped by the item selector, Spokane rooms by skipVenues, and the rest are labelled with their real venue. The first 20 are on the page; the rest come from the site's own 'Load More' endpoint. Verified 2026-10 (166 WA events).",
       "waitFor": ".entry",
       "selectors": {
-        "item": ".entry",
+        "item": ".entry[data-state='WA']",
         "name": "h3 a, h3",
-        "date": ".date-time-container",
-        "ticketLink": "a[href*='/events/detail'], a[href*='axs'], a",
+        "date": ".date",
+        "time": ".time",
+        "venue": ".venue",
+        "support": "h4",
+        "ticketLink": "a[href*='axs.com'], a[href*='/events/detail'], a",
         "image": "img",
         "price": ".price"
+      },
+      "skipVenues": [
+        "Numerica",
+        "First Interstate"
+      ],
+      "pagination": {
+        "url": "https://www.showboxpresents.com/events/events_ajax/{offset}?category=0&venue=0&team=0&exclude=&per_page=20&came_from_page=event-list-page",
+        "start": 20,
+        "step": 20,
+        "maxPages": 15,
+        "format": "json-html"
       }
     },
     {
@@ -84,15 +101,24 @@
       "venue": "Neumos",
       "category": "music",
       "enabled": true,
-      "note": "AEG events list, server-rendered. Verified 2026-07.",
+      "note": "AEG events list, server-rendered. The first 12 are on the page; the rest come from the site's own 'Load More' endpoint. The tagline line is the support act (or a tour name, which lineup parsing ignores). Verified 2026-10 (64 events).",
       "waitFor": ".eventItem",
       "selectors": {
         "item": ".eventItem",
         "name": "h3.title a, h3.title, h3",
         "date": ".m-date__singleDate, .date",
-        "ticketLink": "a[href*='/events/detail'], a[href*='axs'], a",
+        "time": ".time",
+        "support": "h4.tagline",
+        "ticketLink": "a[href*='axs.com'], a[href*='/events/detail'], a",
         "image": "img",
         "price": ".price"
+      },
+      "pagination": {
+        "url": "https://www.neumos.com/events/events_ajax/{offset}?category=0&venue=0&team=0&exclude=&per_page=12&came_from_page=event-list-page",
+        "start": 12,
+        "step": 12,
+        "maxPages": 15,
+        "format": "json-html"
       }
     },
     {
@@ -121,8 +147,8 @@
       "city": "Tacoma",
       "venue": "Jazzbones",
       "category": "music",
-      "enabled": true,
-      "note": "VenuePilot JS widget (renders into #venuepilot-app) — needs the browser to execute JS; selectors are best-effort and may need tuning with HEADLESS=false. The old /events path 404s.",
+      "enabled": false,
+      "note": "Ingested via the 'jazzbones' VenuePilot feed in feeds.json instead — the widget is JS-rendered, but VenuePilot's public events API returns the same listings as structured data.",
       "waitFor": "#venuepilot-app [class*='event']",
       "selectors": {
         "item": "#venuepilot-app [class*='event-card'], #venuepilot-app li[class*='event'], #venuepilot-app article, #venuepilot-app .event",
@@ -151,7 +177,7 @@
       "venue": "The New Frontier Lounge",
       "category": "music",
       "enabled": false,
-      "note": "DO NOT ENABLE: thenewfrontierlounge.com has expired and now serves an unrelated spam site (checked 2026-07). Re-point the url if the venue returns with a new website."
+      "note": "Superseded by the 'new-frontier-lounge' VenuePilot feed in feeds.json: the venue moved to newfrontierlounge.com (the old thenewfrontierlounge.com domain now serves spam)."
     },
     {
       "id": "full-tilt-georgetown",
@@ -314,7 +340,7 @@
       "venue": "Conor Byrne Pub",
       "category": "music",
       "enabled": false,
-      "note": "JS-rendered Squarespace calendar (VenuePilot ticketing) — no server-rendered listing to verify against. Tune selectors with HEADLESS=false, then enable.",
+      "note": "Ingested via the 'conor-byrne' VenuePilot feed in feeds.json instead — the widget is JS-rendered, but VenuePilot's public events API returns the same listings as structured data.",
       "waitFor": ".eventlist-event, .yui3-calendar, [class*='event']",
       "selectors": {
         "item": ".eventlist-event, [class*='event-card'], article",
@@ -352,7 +378,7 @@
       "venue": "Tracyton Movie House",
       "category": "music",
       "enabled": false,
-      "note": "VenuePilot JS widget (like Jazzbones) — no server-rendered listing to verify against. Tune selectors with HEADLESS=false, then enable.",
+      "note": "Ingested via the 'tracyton-movie-house' VenuePilot feed in feeds.json instead — the widget is JS-rendered, but VenuePilot's public events API returns the same listings as structured data.",
       "waitFor": "[class*='event']",
       "selectors": {
         "item": "[class*='event-card'], li[class*='event'], article, .event",
@@ -401,7 +427,31 @@
       "venue": "Alma Mater",
       "category": "music",
       "enabled": false,
-      "note": "Site returns 403 to automated requests on /events, and the homepage event widget showed stale 2021 entries at verification (2026-07). Verify in a real browser before enabling."
+      "note": "DO NOT ENABLE: Alma Mater closed in October 2023; the site is a frozen copy with 2021 events (checked 2026-10)."
+    },
+    {
+      "id": "mcmenamins-elks-temple",
+      "name": "McMenamins Elks Temple",
+      "url": "https://www.mcmenamins.com/elks-temple",
+      "city": "Tacoma",
+      "venue": "McMenamins Elks Temple",
+      "category": "music",
+      "enabled": true,
+      "note": "Server-rendered event cards for the Elks Temple (mostly the Spanish Ballroom), labelled with the real room. Chain-wide promos ('All Locations') are skipped. Tickets sell through Etix; links go to McMenamins' event page. The page repeats every card in a mobile copy, so only the desktop list (#musiccontents) is read. Verified 2026-10 (~60 events).",
+      "waitFor": "#musiccontents .tm-panel-card.event",
+      "selectors": {
+        "item": "#musiccontents .tm-panel-card.event",
+        "name": ".tm-panel-titlebg .uk-panel-title",
+        "date": ".tm-card-content .uk-panel-title",
+        "time": ".uk-panel-time",
+        "venue": ".tm-card-title span",
+        "ticketLink": "a[href*='/events/']",
+        "image": "img.tm-card-avatar",
+        "price": ".uk-panel-price"
+      },
+      "skipVenues": [
+        "All Locations"
+      ]
     }
   ]
 }

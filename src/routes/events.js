@@ -16,17 +16,12 @@ import {
   getAllTags,
 } from '../db/queries.js';
 import { scoreEvents, scoreAndRank } from '../scoring/engine.js';
+import { localISO, todayISO, addDays } from '../dates.js';
+import { topPicks } from '../picks.js';
 
 const router = express.Router();
 
 // ── Date helpers (server-local time; self-hosted in the target timezone) ──
-function localISO(d) {
-  const tz = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - tz).toISOString().slice(0, 10);
-}
-function todayISO() {
-  return localISO(new Date());
-}
 function weekBounds(ref = new Date()) {
   const d = new Date(ref);
   const day = (d.getDay() + 6) % 7; // 0 = Monday
@@ -36,12 +31,6 @@ function weekBounds(ref = new Date()) {
   sunday.setDate(monday.getDate() + 6);
   return { from: localISO(monday), to: localISO(sunday) };
 }
-function addDays(iso, n) {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() + n);
-  return localISO(d);
-}
-
 // Parse the persistent filter set from query params (shared by all views).
 function parseFilters(q) {
   return {
@@ -119,13 +108,10 @@ router.get('/views/week', (req, res) => {
   res.json({ from, to, days });
 });
 
-// ── View: Top Picks (highest scored, next 30 days) ───────────────────────
+// ── View: Top Picks (highest scored, next 30 days, plus Your Artists) ────
 router.get('/views/top-picks', (req, res) => {
-  const today = todayISO();
-  const filters = { ...parseFilters(req.query), dateFrom: today, dateTo: addDays(today, 30) };
   const limit = Math.min(100, parseInt(req.query.limit, 10) || 50);
-  const events = scoreAndRank(queryEvents(filters)).slice(0, limit);
-  res.json({ from: today, to: addDays(today, 30), events });
+  res.json(topPicks({ filters: parseFilters(req.query), limit }));
 });
 
 // ── View: Curated (produced by the /curate Claude Code routine) ──────────

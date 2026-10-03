@@ -111,8 +111,30 @@ test('toTime: does not false-match inside words or junk', () => {
 test('classify: hints and fallback', () => {
   assert.equal(classify('Stand-Up Showcase'), 'comedy');
   assert.equal(classify('Jazz Night'), 'music');
-  assert.equal(classify('Trivia', 'music'), 'music');
   assert.equal(classify('Trivia'), 'other');
+  assert.equal(classify('Acid Mothers Temple w/ Magick Potion', 'music'), 'music');
+});
+
+test('toTime: prefers the show time over doors', () => {
+  assert.equal(toTime('4pm doors, 5pm show & 8pm doors, 9pm show'), '17:00');
+  assert.equal(toTime('Doors 7:00 PM / Show 8:00 PM'), '20:00');
+  assert.equal(toTime('Doors: 8:00 PM'), '20:00');
+});
+
+test('classify: non-show nights at music venues are "other", not music', () => {
+  assert.equal(classify('Raised By TV Events Presents: all ages LOTR films Trivia Night', 'music'), 'other');
+  assert.equal(classify('Free spooky movie night- The Love Witch (2016)', 'music'), 'other');
+  assert.equal(classify('Sunday Funday- all ages drag and bingo!', 'music'), 'other');
+  assert.equal(classify('Ruby Mimosa Presents: BurlesKaraoke', 'music'), 'other');
+  assert.equal(classify('Tacoma’s Chinese Expulsion of 1885 Presented by Ryan Dearinger History Pub', 'music'), 'other');
+  assert.equal(classify('2nd Annual Elks Holiday Brewfest', 'music'), 'other');
+  assert.equal(classify('Grit City After Dark: An Evening of True Crime Tales', 'music'), 'other');
+  assert.equal(classify('QUEERAROKE w/ OBEY LYPSO', 'music'), 'other');
+});
+
+test('classify: only the title decides "not a show", not a description', () => {
+  const text = 'ComedyEvent Jo Koy — comedian who starred in the film Easter Sunday';
+  assert.equal(classify(text, '', 'Jo Koy'), 'comedy');
 });
 
 test('clean: collapses whitespace', () => {

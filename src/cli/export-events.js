@@ -30,11 +30,13 @@ function main() {
     date: e.date,
     time: e.time,
     category: e.category,
-    genre_tags: e.genre_tags,
+    lineup: e._lineup,
+    genre_tags: e._tags.join(', '),
     price_range: e.price_range,
     ticket_url: e.ticket_url,
     interested: e.interested,
     score: Number(e._score?.toFixed?.(2) ?? 0),
+    why: e._reasons.map((r) => r.text),
   }));
 
   const out = { generated_at: new Date().toISOString(), count: events.length, events };
