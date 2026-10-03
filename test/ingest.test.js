@@ -1,9 +1,9 @@
 // Tests for the ingest pipeline: lineup storage and pruning of listings a
 // complete source no longer shows. Runs against a throwaway in-memory database.
+import './helpers/memory-db.js'; // must stay the first import
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.EVENTLIGHT_DB = ':memory:';
 const { migrate } = await import('../src/db/migrate.js');
 const { default: db } = await import('../src/db/index.js');
 const { setInterested } = await import('../src/db/queries.js');

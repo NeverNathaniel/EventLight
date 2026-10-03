@@ -12,13 +12,14 @@ export const THEATERS = [
     name: 'The Grand Cinema',
     url: 'https://grandcinema.com',
     city: 'Tacoma',
+    tz: 'America/Los_Angeles', // the theater's schedule dates are local
     platform: 'indy',
     siteId: 138,
     circuitId: 87,
   },
 ];
 
-const DAYS_AHEAD = 42;
+export const DAYS_AHEAD = 42;
 
 // Refresh every theater. Returns one run per theater in the adapter shape
 // (see adapters/index.js), so each is logged and shown in the status bar.
@@ -31,8 +32,8 @@ export async function refreshCinemas() {
       // An empty answer is more likely a hiccup than an empty month — keep
       // the last good listings rather than wiping them.
       if (movies.length) {
-        const { saved } = replaceTheaterMovies(theater.id, movies);
-        run.counts = { found: saved, added: saved };
+        const { saved, added } = replaceTheaterMovies(theater.id, movies);
+        run.counts = { found: saved, added };
       } else {
         run.status = 'error';
         run.error_msg = 'No showtimes returned — kept the previous listings';

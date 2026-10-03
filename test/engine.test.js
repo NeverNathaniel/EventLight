@@ -1,10 +1,10 @@
 // Tests for the preference engine: favorites, sound-alikes, genre matching,
 // penalties and the reasons attached to each score. Runs against a throwaway
 // in-memory database.
+import './helpers/memory-db.js'; // must stay the first import
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.EVENTLIGHT_DB = ':memory:';
 const { migrate } = await import('../src/db/migrate.js');
 const { default: db } = await import('../src/db/index.js');
 const { upsertEvent, setManualGenre, setInterested, setHidden } = await import('../src/db/queries.js');

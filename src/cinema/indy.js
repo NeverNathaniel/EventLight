@@ -69,11 +69,18 @@ export function mapIndyMovie(m, showtimes, theater) {
   };
 }
 
+// A calendar date (YYYY-MM-DD) as seen in the theater's time zone — its
+// schedule is keyed by local dates, which run behind UTC every evening.
+export function localDate(when, tz) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(when);
+}
+
 // Every film with a showtime between now and `days` ahead, showtimes as UTC ISO.
 export async function fetchIndyMovies(theater, { days = 28, now = new Date() } = {}) {
   const gql = client(theater);
-  const today = now.toISOString().slice(0, 10);
-  const until = new Date(now.getTime() + days * 86400000).toISOString().slice(0, 10);
+  const tz = theater.tz || 'America/Los_Angeles';
+  const today = localDate(now, tz);
+  const until = localDate(new Date(now.getTime() + days * 86400000), tz);
 
   const datesRaw = (await gql('{ datesWithShowing { value } }'))?.datesWithShowing?.value;
   const dates = (typeof datesRaw === 'string' ? JSON.parse(datesRaw) : datesRaw || [])

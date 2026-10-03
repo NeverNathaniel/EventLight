@@ -217,11 +217,12 @@ function dashboard() {
 
     async toggleMovieHidden(id, value) {
       try {
-        await fetch(`/api/movies/${id}/hidden`, {
+        const res = await fetch(`/api/movies/${id}/hidden`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ value }),
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         if (value) this.flash('Hidden. "Show filtered" at the bottom brings it back.');
         await this.load();
       } catch {

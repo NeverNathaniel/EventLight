@@ -4,14 +4,14 @@
 import express from 'express';
 import { getMovies, setMovieHidden } from '../db/movies.js';
 import { groupMovies } from '../cinema/group.js';
-import { THEATERS } from '../cinema/index.js';
+import { THEATERS, DAYS_AHEAD } from '../cinema/index.js';
 
 const router = express.Router();
 
 router.get('/views/movies', (req, res) => {
   res.json({
     theaters: THEATERS.map(({ id, name, url, city }) => ({ id, name, url, city })),
-    ...groupMovies(getMovies()),
+    ...groupMovies(getMovies(), Date.now(), { windowDays: DAYS_AHEAD }),
   });
 });
 

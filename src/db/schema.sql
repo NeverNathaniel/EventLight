@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS movies (
   showtimes      TEXT NOT NULL DEFAULT '[]',
   first_showing  TEXT,
   last_showing   TEXT,
+  peak_showings  INTEGER NOT NULL DEFAULT 0, -- most showtimes ever listed at once
   wd_genres      TEXT,                      -- comma-separated
   wd_series      TEXT,                      -- franchise / film series, if any
   rt_score       INTEGER,                   -- Rotten Tomatoes %

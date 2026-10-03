@@ -1,5 +1,6 @@
 // Tests for the Movies feature: the kids / vapid-action filter, the Indy
 // Systems mapping (The Grand Cinema) and Wikidata parsing. No network.
+import './helpers/memory-db.js'; // must stay the first import
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyMovie } from '../src/cinema/filter.js';
@@ -40,6 +41,12 @@ test('titles that merely mention kids or children are kept', () => {
   assert.equal(verdict({ title: 'A Family Drama', wd_genres: 'family drama film' }).hidden, false);
 });
 
+test('repertory and sing-along screenings are kept', () => {
+  assert.equal(verdict({ title: '2001: A Space Odyssey', rating: 'G', genre: 'Science Fiction', release_date: '1968-04-02' }).hidden, false);
+  assert.equal(verdict({ title: 'Grease Sing-Along', rating: 'PG', genre: 'Musical' }).hidden, false);
+  assert.equal(verdict({ title: 'Muppet Treasure Island', rating: 'G', release_date: '1996-02-16' }).kind, 'kids');
+});
+
 test('grown-up animation and PG fantasy without a kids tag are kept', () => {
   assert.equal(verdict({ title: 'Wildwood', rating: 'PG-13', genre: 'Animation' }).hidden, false);
   assert.equal(verdict({ title: 'Legend', rating: 'PG', genre: 'Adventure', wd_genres: 'fantasy film, adventure film' }).hidden, false);
@@ -54,6 +61,15 @@ test('vapid action is filtered: franchise and superhero films need real acclaim'
   const endgame = verdict({ title: 'Avengers: Endgame', rating: 'PG-13', wd_genres: 'superhero film, action film', wd_series: 'Marvel Cinematic Universe', rt_score: 94, mc_score: 78 });
   assert.equal(endgame.kind, 'action');
   assert.match(endgame.reason, /^Superhero movie/);
+});
+
+test('acclaimed franchise action and unscored restorations are kept', () => {
+  assert.equal(
+    verdict({ title: 'Terminator 2: Judgment Day', rating: 'R', wd_genres: 'action film, science fiction film', wd_series: 'Terminator', rt_score: 91, mc_score: 75 }).hidden,
+    false
+  );
+  assert.equal(verdict({ title: 'Police Story (4K)', rating: null, genre: 'Action', wd_series: 'Police Story' }).hidden, false);
+  assert.equal(verdict({ title: 'Captain Somebody', rating: 'PG-13', wd_genres: 'superhero film' }).kind, 'action');
 });
 
 test('acclaimed action is kept', () => {
@@ -139,8 +155,7 @@ test('groupMovies: runs, special screenings, coming soon, filtered, hidden', asy
   assert.deepEqual(g.hidden.map((m) => m.title), ['Not For Me']);
 });
 
-test('replaceTheaterMovies keeps your ✕ and cached facts, drops films no longer showing', async () => {
-  process.env.EVENTLIGHT_DB = ':memory:';
+test('replaceTheaterMovies keeps your ✕ and cached facts; films that drop out just lose their showtimes', async () => {
   const { default: db } = await import('../src/db/index.js');
   const { replaceTheaterMovies, setMovieHidden, saveMovieFacts, getMovies } = await import('../src/db/movies.js');
   const base = { theater_id: 'grand-cinema', theater: 'The Grand Cinema', title: 'X', showtimes: ['2030-01-01T03:00:00.000Z'] };
@@ -149,10 +164,54 @@ test('replaceTheaterMovies keeps your ✕ and cached facts, drops films no longe
   setMovieHidden(keep, true);
   saveMovieFacts(keep, { genres: ['drama film'], series: null, rt: 90, mc: 80 });
   const result = replaceTheaterMovies('grand-cinema', [{ ...base, source_id: '1', title: 'Keep (updated)' }]);
-  assert.deepEqual(result, { saved: 1, removed: 1 });
-  const [m] = getMovies();
-  assert.equal(m.title, 'Keep (updated)');
-  assert.equal(m.hidden, 1);
-  assert.equal(m.rt_score, 90);
-  assert.deepEqual(m.showtimes, ['2030-01-01T03:00:00.000Z']);
+  assert.deepEqual(result, { saved: 1, added: 0, removed: 1 });
+  const byId = Object.fromEntries(getMovies().map((m) => [m.source_id, m]));
+  assert.equal(byId['1'].title, 'Keep (updated)');
+  assert.equal(byId['1'].hidden, 1);
+  assert.equal(byId['1'].rt_score, 90);
+  assert.deepEqual(byId['1'].showtimes, ['2030-01-01T03:00:00.000Z']);
+  assert.deepEqual(byId['2'].showtimes, []); // off the tab, row (and any ✕) kept
+  // Coming back un-hides nothing and restores its showtimes.
+  setMovieHidden(db.prepare("SELECT id FROM movies WHERE source_id = '2'").get().id, true);
+  replaceTheaterMovies('grand-cinema', [{ ...base, source_id: '1' }, { ...base, source_id: '2', title: 'Back' }]);
+  const back = getMovies().find((m) => m.source_id === '2');
+  assert.equal(back.hidden, 1);
+  assert.equal(back.showtimes.length, 1);
+});
+
+test('peak_showings remembers a run even when only one show is left', async () => {
+  const { default: db } = await import('../src/db/index.js');
+  const { replaceTheaterMovies, getMovies } = await import('../src/db/movies.js');
+  const { groupMovies } = await import('../src/cinema/group.js');
+  const t = (h) => new Date(Date.parse('2030-02-01T00:00:00Z') + h * 3600000).toISOString();
+  const run = { theater_id: 'grand-cinema', theater: 'The Grand Cinema', source_id: '9', title: 'Long Run', rating: 'R' };
+  replaceTheaterMovies('grand-cinema', [{ ...run, showtimes: [t(1), t(5), t(25), t(29), t(49)] }]);
+  replaceTheaterMovies('grand-cinema', [{ ...run, showtimes: [t(49)] }]); // its last day
+  const film = getMovies().find((m) => m.source_id === '9');
+  assert.equal(film.peak_showings, 5);
+  const g = groupMovies([film], Date.parse('2030-02-02T12:00:00Z'));
+  assert.deepEqual(g.nowPlaying.map((m) => m.title), ['Long Run']);
+  db.exec("DELETE FROM movies WHERE source_id = '9'");
+});
+
+test("a run opening at the edge of the fetched window is Coming Soon, not a one-off", async () => {
+  const { groupMovies } = await import('../src/cinema/group.js');
+  const now = Date.parse('2026-10-03T19:00:00Z');
+  const day = (n) => new Date(now + n * 86400000).toISOString();
+  const g = groupMovies(
+    [
+      { id: 1, title: 'New Run', rating: 'R', hidden: 0, showtimes: [day(40), day(41)] },
+      { id: 2, title: 'One Night', rating: 'R', hidden: 0, showtimes: [day(20)] },
+    ],
+    now,
+    { windowDays: 42 }
+  );
+  assert.deepEqual(g.comingSoon.map((m) => m.title), ['New Run']);
+  assert.deepEqual(g.special.map((m) => m.title), ['One Night']);
+});
+
+test("the schedule window uses the theater's local date, not UTC", async () => {
+  const { localDate } = await import('../src/cinema/indy.js');
+  // 6pm Pacific on Oct 3 is already Oct 4 in UTC.
+  assert.equal(localDate(new Date('2026-10-04T01:00:00Z'), 'America/Los_Angeles'), '2026-10-03');
 });

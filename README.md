@@ -265,7 +265,7 @@ Scores are computed at query time and used for **Top Picks** and the **relevance
 The **Movies** tab lists everything showing at [The Grand Cinema](https://grandcinema.com) in Tacoma over the next six weeks. It has three sections:
 
 - **Now Playing**: current runs, leaving-soonest first.
-- **Special Screenings**: one-nights, repertory, and the Tacoma Film Festival, as a day-by-day program.
+- **Special Screenings**: one-nights, repertory, and the Tacoma Film Festival (films with three or fewer showtimes), as a day-by-day program. A regular run stays in Now Playing through its last days.
 - **Coming Soon**: runs that open more than a week out.
 
 Each film shows its poster, rating, runtime, director, cast, synopsis, showtimes by day (in your browser's timezone), the trailer, and a ticket link.
@@ -273,17 +273,18 @@ Each film shows its poster, rating, runtime, director, cast, synopsis, showtimes
 **Filtered out** (`src/cinema/filter.js`). Every decision carries a reason, and **Show filtered** at the bottom of the tab lists what was left out and why.
 
 - **Kids' movies**:
-  - rated G;
+  - rated G, if released since 1990 (*2001: A Space Odyssey* stays);
   - filed under Family/Kids by the theater;
   - tagged a children's or family film on Wikidata (unless rated R/NC-17);
   - animated and rated PG;
   - kids' programs by name, e.g. "Shorts4Shorties", "Free Family Flick", "Cereal Cinema".
 - **Vapid action movies**: action, superhero or martial-arts films that aren't critically acclaimed.
-  - Franchise and superhero films need Metacritic ≥ 80. *The Dark Knight* and *Mad Max: Fury Road* pass; *Fast X* and most of the MCU don't.
+  - Superhero films need Metacritic ≥ 80. *The Dark Knight* passes; most of the MCU doesn't.
+  - Other franchise films need Metacritic ≥ 75 or Rotten Tomatoes ≥ 90. *Terminator 2* and *Mad Max: Fury Road* pass; *Fast X* doesn't.
   - Other action films need Metacritic ≥ 65 or Rotten Tomatoes ≥ 80.
-  - A non-franchise action film with no scores on record gets the benefit of the doubt.
+  - An action film with no scores on record (a restoration, a new import) gets the benefit of the doubt unless it's a superhero film.
 
-Genres, franchise and critic scores come from [Wikidata](https://www.wikidata.org/), looked up by the TMDB id the theater supplies. It's free, needs no key, and is cached for a week. The ✕ on any film hides it; hidden films are listed under **Show filtered** with a button to bring them back.
+Genres, franchise and critic scores come from [Wikidata](https://www.wikidata.org/), looked up by the TMDB id the theater supplies. It's free, needs no key, and is cached for a week. The ✕ on any film hides it; hidden films are listed under **Show filtered** with a button to bring them back, and stay hidden even if the film briefly drops out of a refresh.
 
 **How it's fetched** (`src/cinema/indy.js`). The Grand's website runs on the Indy Systems ticketing platform, whose frontend loads showtimes from a GraphQL endpoint on the theater's own domain. EventLight makes the same requests the site does: one to list the dates with showtimes, then one per date. That's a few dozen small requests per refresh. Note that the theater's `robots.txt` disallows `/graphql` for crawlers. Other Indy Systems cinemas can be added to `THEATERS` in `src/cinema/index.js`; their `site-id` / `circuit-id` are the headers their website sends.
 
