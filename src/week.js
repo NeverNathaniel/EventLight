@@ -2,7 +2,7 @@
 // glance, and everything you can tap into from there — a show, a night, an
 // artist, a venue. Films from the cinema listings sit alongside the shows.
 import { queryEvents, getEventById, getHomeSetting } from './db/queries.js';
-import { getArtist, parseLineupColumn } from './db/artists.js';
+import { getArtist, getArtistProfile, parseLineupColumn } from './db/artists.js';
 import { scoreEvents, buildContext, hasArtistMatch } from './scoring/engine.js';
 import { proximity } from './scoring/home.js';
 import { onePerShow } from './picks.js';
@@ -172,7 +172,20 @@ export function eventDetails(id, { today = todayISO(), now = Date.now() } = {}) 
   };
 }
 
-// The artist sheet: who they are to you and every upcoming date in the next year.
+// An artist profile (src/enrich/profile.js) as the artist sheet shows it,
+// with your favorites marked among the similar artists.
+export function profileView(profile, ctx = buildContext()) {
+  if (!profile) return null;
+  const similar = (profile.similar || []).map((name) => ({
+    name,
+    favorite: lineupKeys(name).some((k) => ctx.favorites.has(k)),
+  }));
+  return { ...profile, similar };
+}
+
+// The artist sheet: who they are to you, every upcoming date in the next
+// year, and their profile if it has been looked up (`profile.fresh` false
+// means it's due for a refresh — GET /api/artist/profile fetches it).
 export function artistView(name, { today = todayISO(), now = Date.now() } = {}) {
   const ctx = buildContext(now);
   const keys = new Set(lineupKeys(name));
@@ -180,7 +193,11 @@ export function artistView(name, { today = todayISO(), now = Date.now() } = {}) 
     parseLineupColumn(r.lineup).some((act) => lineupKeys(act).some((k) => keys.has(k)))
   );
   const upcoming = onePerShow(scoreEvents(rows, now)).map((e) => ({ ...e, kind: e.category }));
-  return { ...artistSummary(name, ctx), upcoming: upcoming.slice(0, 20) };
+  return {
+    ...artistSummary(name, ctx),
+    upcoming: upcoming.slice(0, 20),
+    profile: profileView(getArtistProfile(artistKey(name)), ctx),
+  };
 }
 
 // The venue sheet: its next shows and how far it is from home.

@@ -93,6 +93,18 @@ CREATE TABLE IF NOT EXISTS similar_artists (
 
 CREATE INDEX IF NOT EXISTS idx_similar_artist ON similar_artists(artist_key);
 
+-- ── Artist profiles (the artist sheet) ──────────────────────────────────
+-- Bio, photo, hometown, links and top songs with previews, looked up the
+-- first time someone opens an artist (see src/enrich/profile.js). `data` is
+-- the profile as JSON.
+CREATE TABLE IF NOT EXISTS artist_profiles (
+  artist_key  TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  data        TEXT NOT NULL DEFAULT '{}',
+  status      TEXT NOT NULL,            -- found | partial | not_found | error
+  fetched_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- ── Movies (cinema listings) ────────────────────────────────────────────
 -- One row per film per theater, replaced on each refresh. Showtimes are a
 -- JSON array of UTC ISO datetimes. wd_* columns are Wikidata facts looked up

@@ -248,12 +248,15 @@ function renderWeek() {
   const further = b.further.length
     ? `<h2 class="h">Further out</h2><div class="further">${b.further.map(furtherCard).join('')}</div>`
     : '';
+  // One column on phones; on a wide screen, picks and further out sit beside the days.
   return `<h1 class="title">This week</h1>
     <div class="range">${esc(shortDate(b.from))} – ${esc(shortDate(b.to))}</div>
     <div class="strip">${strip}</div>
-    <h2 class="h">Top picks</h2>${picks}
-    <h2 class="h">Day by day</h2>${days}
-    ${further}`;
+    <div class="week">
+      <section class="w-picks"><h2 class="h">Top picks</h2>${picks}</section>
+      <section class="w-days"><h2 class="h">Day by day</h2>${days}</section>
+      ${further ? `<section class="w-further">${further}</section>` : ''}
+    </div>`;
 }
 
 // ── Explore ─────────────────────────────────────────────────────────────────
@@ -263,16 +266,23 @@ function renderExplore() {
   const seg = (act, key, label, on) => `<button data-act="${act}" data-key="${key}" aria-pressed="${on}">${label}</button>`;
   const cities = state.facets.cities.map((c) => `<option value="${esc(c)}" ${x.city === c ? 'selected' : ''}>${esc(c)}</option>`).join('');
   const filmMode = x.type === 'film';
+  // Filters above the results on phones; a sidebar that stays put on a wide screen.
   return `<h1 class="title">Explore</h1>
-    <input class="search" id="x-search" type="search" placeholder="Search shows, artists, venues" aria-label="Search" value="${esc(x.q)}" ${filmMode ? 'hidden' : ''} />
-    <div class="controls">
-      ${chip('all', 'Everything')}${chip('music', 'Music')}${chip('comedy', 'Comedy')}${chip('film', 'Film')}
-      ${filmMode ? '' : `<select class="select" id="x-city" aria-label="City"><option value="all">Anywhere</option>${cities}</select>`}
-      ${filmMode ? '' : `<div class="seg" role="group" aria-label="View">${seg('x-mode', 'list', 'List', x.mode === 'list')}${seg('x-mode', 'calendar', 'Calendar', x.mode === 'calendar')}</div>`}
-    </div>
-    ${filmMode || x.mode !== 'list' ? '' : `<div class="controls"><div class="seg" role="group" aria-label="Sort" style="margin-left:0">${seg('x-sort', 'date', 'By date', x.sort === 'date')}${seg('x-sort', 'relevance', 'Best match', x.sort === 'relevance')}</div></div>`}
-    <div id="x-results">${renderResults()}</div>
-    <p class="note">Missing a show? <button class="linkbtn" data-open="add" data-key="new">Add it yourself</button>.</p>`;
+    <div class="explore">
+      <div class="x-side">
+        <input class="search" id="x-search" type="search" placeholder="Search shows, artists, venues" aria-label="Search" value="${esc(x.q)}" ${filmMode ? 'hidden' : ''} />
+        <div class="controls">${chip('all', 'Everything')}${chip('music', 'Music')}${chip('comedy', 'Comedy')}${chip('film', 'Film')}</div>
+        ${filmMode ? '' : `<div class="controls">
+          <select class="select" id="x-city" aria-label="City"><option value="all">Anywhere</option>${cities}</select>
+          <div class="seg" role="group" aria-label="View">${seg('x-mode', 'list', 'List', x.mode === 'list')}${seg('x-mode', 'calendar', 'Calendar', x.mode === 'calendar')}</div>
+        </div>`}
+        ${filmMode || x.mode !== 'list' ? '' : `<div class="controls"><div class="seg" role="group" aria-label="Sort">${seg('x-sort', 'date', 'By date', x.sort === 'date')}${seg('x-sort', 'relevance', 'Best match', x.sort === 'relevance')}</div></div>`}
+      </div>
+      <div class="x-main">
+        <div id="x-results">${renderResults()}</div>
+        <p class="note">Missing a show? <button class="linkbtn" data-open="add" data-key="new">Add it yourself</button>.</p>
+      </div>
+    </div>`;
 }
 
 function renderResults() {
@@ -374,13 +384,16 @@ function renderSaved() {
        ${c.events.map((e) => row(e, { day: true, reason: e._reason })).join('')}`
     : '';
   return `<h1 class="title">Saved</h1>
-    <h2 class="h">Going</h2>${going}
-    <div class="box">
-      <p>Put Going shows on your phone’s calendar: subscribe to this link in your calendar app. It works wherever your phone can reach EventLight.</p>
-      <div class="copyrow"><input id="feed-url" readonly value="${esc(feed)}" aria-label="Calendar link" /><button class="pb" data-act="copy-feed">Copy</button></div>
-    </div>
-    <h2 class="h">Maybe</h2>${maybe}
-    ${curated}`;
+    <div class="saved">
+      <section>
+        <h2 class="h">Going</h2>${going}
+        <div class="box">
+          <p>Put Going shows on your phone’s calendar: subscribe to this link in your calendar app. It works wherever your phone can reach EventLight.</p>
+          <div class="copyrow"><input id="feed-url" readonly value="${esc(feed)}" aria-label="Calendar link" /><button class="pb" data-act="copy-feed">Copy</button></div>
+        </div>
+      </section>
+      <section><h2 class="h">Maybe</h2>${maybe}${curated}</section>
+    </div>`;
 }
 
 // ── Detail sheet ────────────────────────────────────────────────────────────
@@ -473,7 +486,12 @@ function sheetDay(d) {
   };
 }
 
+// The artist sheet. What EventLight already knows (how they connect to your
+// taste, their upcoming dates) shows at once; the profile — photo, bio,
+// hometown, links, top songs to preview — fills in when it arrives.
 function sheetArtist(a) {
+  const p = a.profile;
+  const loading = Boolean(a.profileLoading || (!p && !a.profileTried));
   const rel = a.favorite
     ? '♥ One of your favorite artists'
     : a.starred
@@ -483,17 +501,70 @@ function sheetArtist(a) {
           ? `≈ Shares fans with ${a.similar.via.join(' & ')} (≈ ${a.similar.seed})`
           : `≈ Sounds like ${a.similar.seed}`
         : 'No link to your favorites yet. Mark one of their shows Maybe and EventLight learns from it.';
+  // "Since" is when a band formed; for a solo artist MusicBrainz gives a birth year instead.
+  const facts = p
+    ? [p.type === 'Person' ? 'Solo artist' : p.type, p.from, p.since && p.type !== 'Person' ? `Since ${p.since}` : '', p.until ? `Until ${p.until}` : '']
+        .filter(Boolean).join(' · ')
+    : '';
+  const genres = [...new Set([...(a.tags || []), ...(p?.apple?.genre ? [p.apple.genre.toLowerCase()] : [])])];
+  const songs = p?.apple?.songs || [];
+  const links = [
+    ['Spotify', p?.links?.spotify], ['Bandcamp', p?.links?.bandcamp], ['Website', p?.links?.website], ['YouTube', p?.links?.youtube],
+  ].filter(([, url]) => isHttp(url));
+  const similar = p?.similar || [];
+  const photo = isHttp(p?.image) ? `<img class="a-photo" src="${esc(p.image)}" alt="" />` : '';
+  const listen = songs.length
+    ? `<div class="songs">${songs.map((s) => `<button class="song" data-act="play" data-key="${enc(s.preview)}" aria-label="Play a preview of ${esc(s.title)}">
+          <span class="play" aria-hidden="true"></span>
+          ${isHttp(s.artwork) ? `<img src="${esc(s.artwork)}" alt="" loading="lazy" />` : '<span class="noart"></span>'}
+          <span class="sb"><span class="st">${esc(s.title)}</span><span class="sm">${esc([s.album, s.year].filter(Boolean).join(' · '))}</span></span>
+        </button>`).join('')}</div>
+       <p class="src-note">30-second previews from Apple Music. Open Apple Music for the full songs.</p>`
+    : loading
+      ? '<p class="s-sub">Finding their songs…</p>'
+      : '<p class="s-sub">No songs found on Apple Music.</p>';
+  const sources = [p?.bio ? 'Wikipedia' : '', p?.from || p?.type ? 'MusicBrainz' : '', songs.length ? 'Apple Music' : ''].filter(Boolean);
   return {
     body: `<p class="s-eye">Artist</p>
-      <div class="s-title">${esc(a.name)}</div>
-      ${a.tags.length ? `<div class="tags">${a.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
-      <div class="s-h">How they connect to you</div><p class="s-text">${esc(rel)}</p>
+      <div class="a-head ${photo ? '' : 'no-photo'}">${photo}
+        <div>
+          <div class="s-title">${esc(p?.name || a.name)}</div>
+          ${facts ? `<p class="a-facts">${esc(facts)}</p>` : ''}
+          ${p?.description ? `<p class="s-sub">${esc(p.description)}</p>` : ''}
+        </div>
+      </div>
+      <p class="connect">${esc(rel)}</p>
+      <div class="s-h">Listen</div>${listen}
+      ${p?.bio ? `<div class="s-h">About</div><p class="s-text">${esc(p.bio)}</p>
+        ${isHttp(p.wikipedia_url) ? `<a class="more" href="${esc(p.wikipedia_url)}" target="_blank" rel="noopener">More on Wikipedia ↗</a>` : ''}` : ''}
+      ${genres.length ? `<div class="s-h">Genres</div><div class="tags">${genres.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+      ${links.length ? `<div class="s-h">Links</div><div class="links">${links.map(([label, url]) => `<a class="lk" href="${esc(url)}" target="_blank" rel="noopener">${label} ↗</a>`).join('')}</div>` : ''}
+      ${similar.length ? `<div class="s-h">Similar artists</div><div class="links">${similar.map((s) => `<button class="lk" data-open="artist" data-key="${enc(s.name)}">${s.favorite ? '♥ ' : ''}${esc(s.name)}</button>`).join('')}</div>` : ''}
       <div class="s-h">Coming up</div>
-      ${a.upcoming.length ? a.upcoming.map((e) => row(e, { day: true })).join('') : '<p class="s-sub">No dates in the next year.</p>'}`,
-    acts: a.favorite
-      ? '<button class="pb on-maybe" disabled>♥ Favorite</button>'
-      : `<button class="pb" data-act="favorite" data-key="${enc(a.name)}">♥ Add to favorites</button>`,
+      ${a.upcoming.length ? a.upcoming.map((e) => row(e, { day: true })).join('') : '<p class="s-sub">No dates in the next year.</p>'}
+      ${loading && p == null ? '' : sources.length ? `<p class="src-note">From ${sources.join(', ')}.</p>` : ''}`,
+    acts: `${isHttp(p?.apple?.url) ? `<a class="tix apple" href="${esc(p.apple.url)}" target="_blank" rel="noopener">Apple Music ↗</a>` : ''}
+      ${a.favorite
+        ? '<button class="pb on-maybe" disabled>♥ Favorite</button>'
+        : `<button class="pb" data-act="favorite" data-key="${enc(a.name)}">♥ Add to favorites</button>`}`,
   };
+}
+
+// Look the artist's profile up when it's missing or stale, then redraw the
+// sheet if it's still the one on screen.
+async function loadArtistProfile(top) {
+  const a = top.data;
+  if (a.profile?.fresh || a.profileLoading || a.profileTried) return;
+  a.profileLoading = true;
+  try {
+    const profile = await api(`/api/artist/profile?name=${encodeURIComponent(top.key)}`);
+    if (profile) a.profile = profile;
+  } catch {
+    /* the sheet keeps what it has */
+  }
+  a.profileLoading = false;
+  a.profileTried = true;
+  if (sheet.stack[sheet.stack.length - 1] === top) renderSheet();
 }
 
 function sheetVenue(v) {
@@ -531,7 +602,7 @@ function sheetAdd() {
 const SHEETS = {
   event: { url: (k) => `/api/events/${encodeURIComponent(k)}/details`, render: sheetEvent },
   day: { url: (k) => `/api/views/day?date=${encodeURIComponent(k)}`, render: sheetDay },
-  artist: { url: (k) => `/api/artist?name=${encodeURIComponent(k)}`, render: sheetArtist },
+  artist: { url: (k) => `/api/artist?name=${encodeURIComponent(k)}`, render: sheetArtist, after: loadArtistProfile },
   venue: { url: (k) => `/api/venue?name=${encodeURIComponent(k)}`, render: sheetVenue },
   film: { local: (k) => films.get(k), render: sheetFilm },
   add: { local: () => ({}), render: sheetAdd },
@@ -578,11 +649,62 @@ async function renderSheet() {
   const { body, acts } = kind.render(top.data);
   sheetBody.innerHTML = body;
   sheetActs.innerHTML = acts;
-  sheetActs.hidden = !acts;
+  sheetActs.hidden = !acts.trim();
+  syncPlayer();
+  kind.after?.(top);
 }
+
+// A photo or cover that fails to load (a moved file, no network) is dropped
+// rather than shown as a broken image.
+document.addEventListener('error', (ev) => {
+  const img = ev.target;
+  if (img.tagName !== 'IMG') return;
+  if (img.classList.contains('a-photo')) {
+    img.closest('.a-head')?.classList.add('no-photo');
+    img.remove();
+  } else {
+    img.replaceWith(Object.assign(document.createElement('span'), { className: 'noart' }));
+  }
+}, true);
+
+// ── Song previews ───────────────────────────────────────────────────────────
+// One player for the whole app: tapping a song plays its preview, tapping it
+// again pauses, and closing or leaving the sheet stops it.
+const player = new Audio();
+player.preload = 'none';
+function syncPlayer() {
+  const current = player.src && !player.paused && !player.error ? player.src : null;
+  sheetBody.querySelectorAll('.song').forEach((el) => {
+    const on = current && decodeURIComponent(el.dataset.key) === current;
+    el.classList.toggle('playing', Boolean(on));
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (!on) el.style.setProperty('--p', '0');
+  });
+}
+function playPreview(url) {
+  if (player.src === url && !player.paused) {
+    player.pause();
+  } else {
+    if (player.src !== url) player.src = url;
+    player.play().catch(() => toast('Couldn’t play that preview.'));
+  }
+}
+function stopPreview() {
+  if (!player.paused) player.pause();
+}
+for (const type of ['play', 'pause', 'ended']) player.addEventListener(type, syncPlayer);
+player.addEventListener('error', () => {
+  toast('This browser can’t play the preview. Open it in Apple Music instead.');
+  syncPlayer();
+});
+player.addEventListener('timeupdate', () => {
+  const el = [...sheetBody.querySelectorAll('.song.playing')][0];
+  if (el && player.duration) el.style.setProperty('--p', String(player.currentTime / player.duration));
+});
 
 function openSheet(type, key) {
   if (!sheet.stack.length) sheet.opener = document.activeElement;
+  stopPreview();
   const top = sheet.stack[sheet.stack.length - 1];
   if (top && top.type === type && top.key === key) return;
   sheet.stack.push({ type, key, data: null });
@@ -590,6 +712,7 @@ function openSheet(type, key) {
 }
 
 function closeSheet() {
+  stopPreview();
   sheet.stack = [];
   renderSheet();
 }
@@ -790,7 +913,6 @@ function route() {
     if (a.dataset.nav === state.route) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
-  document.getElementById('app').classList.toggle('wide', state.route === 'explore');
   closeSheet();
   render();
   load();
@@ -833,7 +955,8 @@ document.addEventListener('click', (ev) => {
   if (act?.startsWith('x-')) flushSearch();
   switch (act) {
     case 'close': closeSheet(); break;
-    case 'back': sheet.stack.pop(); renderSheet(); break;
+    case 'back': stopPreview(); sheet.stack.pop(); renderSheet(); break;
+    case 'play': playPreview(decodeURIComponent(key)); break;
     case 'morepicks': state.morePicks = !state.morePicks; render(); break;
     case 'hide': hideEvent(Number(id)); break;
     case 'hide-film': hideFilm(Number(id)); break;

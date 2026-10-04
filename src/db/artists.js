@@ -197,6 +197,48 @@ export function similarArtistsVersion() {
   return `${r.n}|${r.at}`;
 }
 
+// Artists similar to this one, closest first: its own ListenBrainz list
+// (fetched for favorites and starred artists).
+export function getSimilarFor(key, limit = 8) {
+  return db
+    .prepare('SELECT artist_key, name FROM similar_artists WHERE seed_key = ? ORDER BY score DESC LIMIT ?')
+    .all(key, limit);
+}
+
+// ── Artist profiles (the artist sheet) ──────────────────────────────────
+// A found profile is kept for 30 days; a miss is retried after a week; a
+// failed or partly failed lookup (a service down, rate limited, no network)
+// after an hour.
+export function getArtistProfile(key) {
+  const row = db
+    .prepare(
+      `SELECT *, (
+         (status = 'found' AND fetched_at > datetime('now', '-30 days')) OR
+         (status = 'not_found' AND fetched_at > datetime('now', '-7 days')) OR
+         (status IN ('partial', 'error') AND fetched_at > datetime('now', '-1 hours'))
+       ) AS fresh
+       FROM artist_profiles WHERE artist_key = ?`
+    )
+    .get(key);
+  if (!row) return null;
+  let data = {};
+  try {
+    data = JSON.parse(row.data || '{}');
+  } catch {
+    /* a corrupt row reads as empty and is refetched */
+  }
+  return { ...data, key: row.artist_key, status: row.status, fresh: Boolean(row.fresh), fetched_at: row.fetched_at };
+}
+
+export function saveArtistProfile(key, name, status, data) {
+  db.prepare(
+    `INSERT INTO artist_profiles (artist_key, name, data, status, fetched_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(artist_key) DO UPDATE SET
+       name = excluded.name, data = excluded.data, status = excluded.status, fetched_at = excluded.fetched_at`
+  ).run(key, name, JSON.stringify(data || {}), status);
+}
+
 export function countSimilarArtists() {
   return db.prepare('SELECT COUNT(DISTINCT artist_key) AS n FROM similar_artists').get().n;
 }

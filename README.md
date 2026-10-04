@@ -6,6 +6,8 @@ A self-hosted dashboard for live **music** and **comedy** across **Seattle, Taco
 - **Explore** — search and browse everything, as a list or a month calendar; **Film** has the cinema listings
 - **Saved** — the shows you're **Going** to and the ones marked **Maybe**, plus Claude's curated lists
 - **Tap into anything** — a show, a night, an artist or a venue opens with the details: who's on the bill, why it's a pick, what else is on that night, and the artist's other dates
+- **Artist pages** — a photo and short bio, where they're from, top songs with previews you can play right there, similar artists, and links to Apple Music, Spotify, Bandcamp and their website
+- **Phone or desktop** — one column on a phone; on a wide screen the Week, Explore and Saved screens spread into columns
 - **Going / Maybe** — mark your plans; Going shows feed a calendar link you can subscribe to on your phone
 - **Movies** — what's playing at The Grand Cinema (Tacoma), with kids' movies and vapid action movies filtered out
 - **Preference engine** — favorite artists, "sounds like your favorites" discovery, genre weights, and learning from what you star — every pick says *why* it ranks
@@ -273,6 +275,15 @@ Scores are computed at query time and used for **Top picks** and Explore's **Bes
 2. Upcoming headliners get genre tags from MusicBrainz, then their own similar lists, then support acts get tags — soonest shows first.
 3. Tags are rolled up onto each event (`events.artist_tags`).
 
+**Artist pages** (`src/enrich/profile.js`). The first time you open an artist, EventLight looks them up and caches the result in SQLite (`artist_profiles`) for 30 days. All of the sources are free and need no key:
+
+- [MusicBrainz](https://musicbrainz.org/): solo artist or band, hometown, year formed, a one-line description, and links: their website, Bandcamp, Spotify, YouTube, and their Apple Music id, which picks the right artist on Apple when two share a name.
+- [Wikipedia](https://en.wikipedia.org/), through the Wikidata link: a one-paragraph bio and a photo.
+- Apple's [iTunes Search API](https://performance-partners.apple.com/search-api): the Apple Music page and up to five top songs, most popular first, each with Apple's 30-second preview to play in the page. The Apple Music button opens the Music app for full songs.
+- [ListenBrainz](https://listenbrainz.org/): similar artists, when there isn't a list for them already.
+
+The first lookup takes a few seconds. The sheet shows what EventLight already knows straight away and fills in the rest when it arrives. If a source fails or is rate-limited, the profile is saved as partial and re-checked within the hour, and a re-check never wipes what an earlier lookup found.
+
 **Sounds like** compares each artist's similar-artist list with each favorite's, by cosine similarity with inverse-document-frequency weighting. That catches direct links (an act on a favorite's list) and shared-fan links (Movements' listeners also play Joyce Manor and Modern Baseball, both close to PUP), while hub artists that sit on every list — Radiohead, The Beatles — count for little.
 
 **Top picks** on the Week screen are the best-scoring shows in the next seven days (a score of 8 or more, roughly a favorite or sound-alike on the bill, or a strong genre match close to home). **Further out** lists every show by a favorite or starred artist after that, up to a year ahead, since those tours announce months ahead. The weekly digest and `/api/views/top-picks` look 30 days out.
@@ -359,7 +370,7 @@ src/
   routes/          Express handlers (events, week, settings, refresh, status, discover, movies)
   scheduler/       node-cron job + manual triggers
   scoring/         preference engine + close-to-home distances
-  enrich/          artist genres (MusicBrainz) + similar artists (ListenBrainz)
+  enrich/          artist genres (MusicBrainz), similar artists (ListenBrainz), artist profiles (+ Wikipedia, Apple)
   cinema/          movie listings (The Grand Cinema via Indy Systems), Wikidata facts, kids/action filter
   lineup.js        parse the bill (headliner, support) out of an event title
   week.js          the Week screen, plus the show, night, artist and venue details
@@ -387,7 +398,8 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `GET` | `/api/views/day?date=YYYY-MM-DD` | One night: shows best-first, and films |
 | `GET` | `/api/views/saved` | Upcoming `going` and `maybe` shows |
 | `GET` | `/api/events/:id/details` | A show with its lineup (genres, favorites, sound-alikes), what else is on that night, and distance from home |
-| `GET` | `/api/artist?name=…` | An artist: how they connect to your taste, and their upcoming dates |
+| `GET` | `/api/artist?name=…` | An artist: how they connect to your taste, their upcoming dates, and their cached `profile` |
+| `GET` | `/api/artist/profile?name=…` | The artist's profile (bio, photo, hometown, links, top songs with previews, similar artists), looked up if missing or stale |
 | `GET` | `/api/venue?name=…` | A venue's next shows and distance from home |
 | `POST` | `/api/events/:id/plan` | Set your plan: `{ "plan": "going" }`, `"maybe"` or `null`. Going also stars the show |
 | `GET` | `/api/calendar/going.ics` | Your Going shows, as a calendar feed to subscribe to |
@@ -426,7 +438,7 @@ All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInter
 npm test
 ```
 
-Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, the Week screen (the rolling seven days, top picks, films alongside shows, Going / Maybe, show and artist details), and the `.ics` builder.
+Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, the Week screen (the rolling seven days, top picks, films alongside shows, Going / Maybe, show and artist details), artist profiles (parsing MusicBrainz, Wikipedia and Apple answers, caching, partial lookups), and the `.ics` builder.
 
 GitHub Actions runs the same suite on every pull request and every push to `main` (`.github/workflows/test.yml`).
 

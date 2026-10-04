@@ -2,7 +2,7 @@
    EventLight — "Ticket Stub", Halftime colors.
    Top picks are paper tickets (cream stock, orange stub, a teal "Admit two"
    stamp when you're going) on a deep teal table. Light and dark follow the
-   device setting. Settings keeps its own stylesheet (styles.css).
+   device setting. Settings uses this file too, plus settings.css.
    ────────────────────────────────────────────────────────────────────────── */
 
 :root {
@@ -30,6 +30,8 @@
   --going-bg: #064a45;
   --going-ink: #ffffff;
   --scrim: rgba(3, 25, 26, 0.45);
+  --danger: #a3261c;
+  --ok: #1d6b45;
 
   --f-display: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
   --f-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -54,6 +56,8 @@
     --going-bg: #ff7a2f;
     --going-ink: #2b0d00;
     --scrim: rgba(0, 0, 0, 0.5);
+    --danger: #ff9b8a;
+    --ok: #8fdcae;
     color-scheme: dark;
   }
 }
@@ -81,7 +85,7 @@ input, select { font: inherit; color: inherit; }
   margin: 0 auto;
   padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 28px);
 }
-.app.wide { max-width: 760px; }
+@media (min-width: 760px) { .app { max-width: 760px; } }
 
 /* ── Top bar ────────────────────────────────────────────────────────────── */
 .top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -214,7 +218,8 @@ input, select { font: inherit; color: inherit; }
 .chip { font: 600 0.78rem/1 var(--f-body); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--muted); }
 .chip[aria-pressed="true"] { background: var(--stock); border-color: var(--stock); color: var(--stock-ink); }
 .select { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; color: var(--text); font-size: 0.8rem; }
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; margin-left: auto; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; }
+.controls .select + .seg { margin-left: auto; }
 .seg button { border: 0; background: none; border-radius: 999px; padding: 6px 12px; font: 600 0.62rem/1 var(--f-meta); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--surface2); color: var(--text); }
 .sh { position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline; gap: 8px; background: var(--bg); padding: 18px 0 6px; border-bottom: 1px solid var(--line); }
@@ -250,7 +255,7 @@ input, select { font: inherit; color: inherit; }
   border-radius: 14px 14px 0 0; max-width: 640px; margin: 0 auto;
 }
 @media (min-width: 900px) {
-  .sheet { top: 0; left: auto; right: 0; width: 460px; max-width: none; margin: 0; border-radius: 0; border-top: 0; border-left: 1px solid var(--line); }
+  .sheet { top: 0; left: auto; right: 0; width: 500px; max-width: none; margin: 0; border-radius: 0; border-top: 0; border-left: 1px solid var(--line); }
 }
 @media (prefers-reduced-motion: no-preference) {
   .sheet { animation: rise 0.22s ease-out; }
@@ -268,6 +273,35 @@ input, select { font: inherit; color: inherit; }
 .s-title { font: 800 2.3rem/0.95 var(--f-display); letter-spacing: 0.02em; text-transform: uppercase; margin: 6px 0 6px; overflow-wrap: anywhere; }
 .s-sub { font-size: 0.88rem; color: var(--muted); margin: 0 0 2px; }
 .s-text { font-size: 0.9rem; margin: 8px 0 0; }
+/* Artist sheet */
+.a-head { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 14px; align-items: center; margin-top: 8px; }
+.a-head.no-photo { grid-template-columns: minmax(0, 1fr); }
+.a-head .s-title { margin-top: 0; }
+.a-photo { width: 104px; height: 104px; object-fit: cover; border-radius: var(--r-lg); background: var(--surface2); }
+.a-facts { font: 600 0.62rem/1.5 var(--f-meta); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin: 0 0 2px; }
+.connect { display: inline-block; margin: 14px 0 0; padding: 7px 11px; border-radius: var(--r-lg); background: var(--stock); color: var(--stock-ink); font-size: 0.86rem; font-weight: 600; }
+.songs { display: grid; }
+.song {
+  position: relative; display: grid; grid-template-columns: 38px 44px minmax(0, 1fr); gap: 12px; align-items: center;
+  width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px dashed var(--line); padding: 9px 0; color: inherit;
+}
+.song::after { content: ''; position: absolute; left: 0; bottom: -1px; height: 2px; width: calc(var(--p, 0) * 100%); background: var(--stub); }
+.song .play { width: 38px; height: 38px; border-radius: 50%; background: var(--stub); position: relative; }
+.song .play::before {
+  content: ''; position: absolute; left: 14px; top: 11px; border-style: solid; border-width: 8px 0 8px 13px;
+  border-color: transparent transparent transparent var(--stub-ink);
+}
+.song.playing .play::before { left: 12px; top: 12px; width: 14px; height: 14px; border: 0; border-left: 4px solid var(--stub-ink); border-right: 4px solid var(--stub-ink); box-sizing: border-box; }
+.song img, .song .noart { width: 44px; height: 44px; border-radius: var(--r); object-fit: cover; background: var(--surface2); }
+.song .sb { display: grid; min-width: 0; }
+.song .st { font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; }
+.song .sm { font-size: 0.74rem; color: var(--muted); overflow-wrap: anywhere; }
+.song.playing .st { color: var(--accent); }
+.src-note { font: 0.62rem/1.5 var(--f-meta); color: var(--muted); margin: 8px 0 0; }
+.links { display: flex; flex-wrap: wrap; gap: 6px; }
+.lk { font: 600 0.8rem/1 var(--f-body); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface2); color: var(--text); text-decoration: none; }
+.lk:hover { border-color: var(--accent); }
+.tix.apple { margin-left: 0; margin-right: auto; background: var(--stub); border-color: var(--stub); color: var(--stub-ink); }
 .poster { display: block; width: 132px; max-width: 100%; margin-top: 12px; border-radius: var(--r-lg); }
 .s-link { background: none; border: 0; padding: 0; font-weight: 600; color: var(--text); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
 .s-h { font: 600 0.6rem/1 var(--f-meta); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 22px 0 8px; }
@@ -296,3 +330,35 @@ input, select { font: inherit; color: inherit; }
   padding: 10px 14px; font: 0.74rem/1.4 var(--f-meta); text-align: center; box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.5);
 }
 @media (min-width: 900px) { .toast { bottom: 24px; } }
+
+/* ── Wide screens ──────────────────────────────────────────────────────── */
+/* Phones get one column. From 1000px the page widens and each screen splits:
+   Week puts its picks beside the days, Explore its filters beside the
+   results, Saved its Going beside Maybe. */
+.week { display: grid; grid-template-areas: 'picks' 'days' 'further'; }
+.w-picks { grid-area: picks; min-width: 0; }
+.w-days { grid-area: days; min-width: 0; }
+.w-further { grid-area: further; min-width: 0; }
+.saved { display: grid; }
+.saved > section, .x-main, .x-side { min-width: 0; }
+
+@media (min-width: 1000px) {
+  .app { max-width: 1200px; padding-inline: 32px; }
+  .title { font-size: 3.2rem; }
+  .sd { padding: 12px 0 18px; }
+  .sd-n { font-size: 1.9rem; }
+  .sd-w, .sd-c { font-size: 0.62rem; }
+  .week {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: 'picks days' 'further days';
+    column-gap: 56px;
+    align-items: start;
+  }
+  .w-further .further { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); overflow: visible; }
+  .explore { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 56px; align-items: start; }
+  .x-side { position: sticky; top: 16px; }
+  .x-side .controls { gap: 8px; }
+  .x-side .select { flex: 1; }
+  .saved { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); column-gap: 56px; align-items: start; }
+}

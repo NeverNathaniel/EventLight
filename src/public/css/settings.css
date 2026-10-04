@@ -1,0 +1,109 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Settings — the same Ticket Stub / Halftime look as the dashboard. Colors,
+   type, the top bar and tab bar come from app.css (load it first); this file
+   only adds the form pieces Settings needs.
+   ────────────────────────────────────────────────────────────────────────── */
+
+[x-cloak] { display: none !important; }
+
+.settings { max-width: 900px; }
+@media (min-width: 1000px) { .settings { max-width: 960px; } }
+
+code {
+  font: 0.82em var(--f-meta);
+  background: var(--surface2);
+  border-radius: var(--r);
+  padding: 1px 5px;
+}
+
+/* Jump links to each section */
+.jump { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 6px; }
+.jump a {
+  font: 600 0.62rem/1 var(--f-meta); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 8px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); text-decoration: none;
+}
+.jump a:hover { color: var(--text); border-color: var(--accent); }
+
+/* Sections */
+.settings-section {
+  margin-top: 18px; padding: 20px 20px 16px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r-lg); scroll-margin-top: 16px;
+}
+.settings-section h2 { font: 800 1.6rem/1 var(--f-display); letter-spacing: 0.04em; text-transform: uppercase; margin: 0 0 8px; }
+.settings-section .desc { font-size: 0.9rem; color: var(--muted); margin: 0 0 8px; max-width: 70ch; }
+.settings-section .desc a, .sub a { color: var(--accent); }
+.settings-section .desc.accent { color: var(--accent); }
+
+/* .row is also the dashboard's list row in app.css; these settings rows are flex, with a rule above only. */
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 0; border-top: 1px dashed var(--line); border-bottom: 0; }
+.row:first-of-type { border-top: 0; }
+.row .grow { flex: 1; min-width: 180px; }
+.row .name { font-weight: 600; font-size: 0.95rem; }
+.sub { font-size: 0.8rem; color: var(--muted); margin: 2px 0 0; overflow-wrap: anywhere; }
+.sub.danger, .danger { color: var(--danger); }
+.row.end { justify-content: flex-end; }
+
+/* Inputs */
+.settings-section input[type='text'],
+.settings-section input[type='url'],
+.settings-section input[type='password'],
+.settings-section input[type='search'],
+.settings-section select {
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 9px 10px; color: var(--text); font: 0.9rem var(--f-body); min-width: 0;
+}
+.settings-section input::placeholder { color: var(--muted); }
+.settings-section input.wide-input { min-width: min(240px, 100%); }
+.toggle { display: inline-flex; align-items: center; }
+.toggle input { width: 18px; height: 18px; accent-color: var(--stub); }
+
+/* Buttons */
+.btn {
+  font: 600 0.64rem/1 var(--f-meta); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;
+  padding: 10px 13px; border-radius: var(--r); border: 1px solid var(--line); background: var(--surface2);
+  color: var(--text); text-decoration: none; display: inline-block;
+}
+.btn:hover { border-color: var(--accent); }
+.btn-accent { background: var(--stub); border-color: var(--stub); color: var(--stub-ink); }
+.btn-ghost { background: none; }
+.btn-danger { color: var(--danger); }
+.btn-danger:hover { border-color: var(--danger); }
+.btn[disabled] { opacity: 0.45; cursor: default; }
+
+/* Configured / not set */
+.badge {
+  font: 600 0.58rem/1 var(--f-meta); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 5px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+}
+.badge.set { color: var(--ok); border-color: var(--ok); }
+.badge.unset { color: var(--danger); border-color: var(--danger); }
+
+/* 1–5 weights and on/off choices */
+.weight-pills { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.weight-pills button {
+  min-width: 32px; height: 32px; padding: 0 6px; border-radius: var(--r); border: 1px solid var(--line);
+  background: none; font: 600 0.72rem/1 var(--f-meta); color: var(--muted);
+}
+.weight-pills button:hover { color: var(--text); }
+.weight-pills button.on { background: var(--stock); border-color: var(--stock); color: var(--stock-ink); }
+.weight-pills.wide button { padding: 0 11px; }
+
+/* Add-a-feed / add-a-scraper forms */
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.form-grid .full { grid-column: 1 / -1; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field label { font: 600 0.58rem/1.2 var(--f-meta); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.field input, .field select { width: 100%; }
+@media (max-width: 560px) { .form-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Source status */
+.src-pill {
+  display: inline-flex; align-items: center; gap: 6px; font: 600 0.66rem/1 var(--f-meta);
+  padding: 6px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg);
+}
+.src-pill .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.src-pill.ok .sdot { background: var(--ok); }
+.src-pill.error .sdot { background: var(--danger); }
+.src-pill.error { border-color: var(--danger); }
+
+.settings .tags { margin-top: 8px; }
