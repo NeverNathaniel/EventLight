@@ -2,334 +2,52 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EventLight — Seattle / Tacoma Live</title>
-  <meta name="description" content="Live music & comedy across Seattle, Tacoma and the South Sound." />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#d3ecea" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0b3a3c" media="(prefers-color-scheme: dark)" />
+  <title>EventLight</title>
+  <meta name="description" content="What's on this week: live music, comedy and films across Seattle, Tacoma and the South Sound." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Archivo:wght@400;600;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css" />
-  <!-- Component script must load before Alpine so x-data="dashboard()" resolves. -->
-  <script defer src="/js/app.js"></script>
-  <script defer src="/js/vendor/alpine.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css" />
+  <script type="module" src="/js/app.js"></script>
 </head>
-<body x-data="dashboard()" x-init="init()" x-cloak>
-
-  <!-- Marquee bulb strip -->
-  <div class="bulbs" aria-hidden="true">
-    <template x-for="i in 12" :key="i"><span class="bulb"></span></template>
+<body>
+  <div class="app" id="app">
+    <header class="top">
+      <a class="word" href="#week">Event<b>Light</b></a>
+      <div class="top-right">
+        <a class="updated" id="updated" href="/settings.html"></a>
+        <nav class="topnav" aria-label="Main">
+          <a href="#week" data-nav="week">Week</a>
+          <a href="#explore" data-nav="explore">Explore</a>
+          <a href="#saved" data-nav="saved">Saved</a>
+          <a href="/settings.html">Settings</a>
+        </nav>
+      </div>
+    </header>
+    <main id="view"><p class="loading">Loading your week…</p></main>
   </div>
 
-  <header class="wrap">
-    <div class="topbar">
-      <div>
-        <h1 class="wordmark">EVENT<span class="lit">LIGHT</span></h1>
-        <div class="tagline">Live music &amp; comedy · Seattle · Tacoma · South Sound</div>
-      </div>
-      <div class="status-chip">
-        <span class="status-dot" :class="statusDotClass()"></span>
-        <span x-text="statusSummary()"></span>
-        <button class="refresh-btn" @click="refreshAll()" :disabled="refreshing"
-                x-text="refreshing ? 'Refreshing…' : 'Refresh now'"></button>
-        <a class="refresh-btn" href="/settings.html">Settings</a>
-      </div>
+  <nav class="tabbar" aria-label="Main">
+    <a href="#week" data-nav="week">Week</a>
+    <a href="#explore" data-nav="explore">Explore</a>
+    <a href="#saved" data-nav="saved">Saved</a>
+    <a href="/settings.html">Settings</a>
+  </nav>
+
+  <div class="backdrop" id="backdrop" hidden></div>
+  <aside class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Details" hidden>
+    <div class="sheet-bar">
+      <button class="sbtn invisible" data-act="back">‹ Back</button>
+      <span class="grab" aria-hidden="true"></span>
+      <button class="sbtn close" data-act="close">Close</button>
     </div>
-
-    <!-- Marquee tabs -->
-    <nav class="tabs">
-      <button class="tab" :class="{ 'is-active': view==='tonight' }" @click="setView('tonight')">Tonight</button>
-      <button class="tab" :class="{ 'is-active': view==='week' }" @click="setView('week')">This Week</button>
-      <button class="tab" :class="{ 'is-active': view==='top' }" @click="setView('top')">Top Picks</button>
-      <button class="tab" :class="{ 'is-active': view==='curated' }" @click="setView('curated')">Curated</button>
-      <button class="tab" :class="{ 'is-active': view==='month' }" @click="setView('month')">This Month</button>
-      <button class="tab" :class="{ 'is-active': view==='movies' }" @click="setView('movies')">Movies</button>
-      <button class="tab" :class="{ 'is-active': view==='browse' }" @click="setView('browse')">Browse All</button>
-      <span class="tab-spacer"></span>
-      <button class="tab icon" @click="openAdd()" title="Add an event manually">＋ Add</button>
-    </nav>
-
-    <!-- Filter bar (events only — the Movies tab has its own filtering) -->
-    <div class="filterbar" x-show="view!=='movies'">
-      <div class="filter-group">
-        <div class="seg" role="group" aria-label="Category">
-          <button :class="{ 'is-active': filters.category==='all' }" @click="setFilter('category','all')">All</button>
-          <button :class="{ 'is-active': filters.category==='music' }" @click="setFilter('category','music')">Music</button>
-          <button :class="{ 'is-active': filters.category==='comedy' }" @click="setFilter('category','comedy')">Comedy</button>
-        </div>
-      </div>
-
-      <div class="filter-group">
-        <label>City</label>
-        <select x-model="filters.city" @change="apply()">
-          <option value="all">All</option>
-          <template x-for="c in facets.cities" :key="c"><option :value="c" x-text="c"></option></template>
-        </select>
-      </div>
-
-      <!-- Genre multi-select -->
-      <div class="filter-group chip-select">
-        <button class="chip-trigger" @click="toggleMenu('genres')">
-          Genres <span class="count" x-show="filters.genres.length" x-text="'('+filters.genres.length+')'"></span> ▾
-        </button>
-        <div class="chip-menu" x-show="openMenu==='genres'" @click.outside="openMenu=null" x-cloak>
-          <template x-if="!facets.tags.length"><div class="sub" style="color:var(--muted)">No tags yet</div></template>
-          <template x-for="t in facets.tags" :key="t">
-            <label><input type="checkbox" :value="t" x-model="filters.genres" @change="apply()" /> <span x-text="t"></span></label>
-          </template>
-        </div>
-      </div>
-
-      <!-- Source multi-select -->
-      <div class="filter-group chip-select">
-        <button class="chip-trigger" @click="toggleMenu('sources')">
-          Source <span class="count" x-show="filters.sources.length" x-text="'('+filters.sources.length+')'"></span> ▾
-        </button>
-        <div class="chip-menu" x-show="openMenu==='sources'" @click.outside="openMenu=null" x-cloak>
-          <template x-for="s in facets.sources" :key="s">
-            <label><input type="checkbox" :value="s" x-model="filters.sources" @change="apply()" /> <span x-text="s"></span></label>
-          </template>
-        </div>
-      </div>
-
-      <div class="filter-group">
-        <input type="search" placeholder="Search title, artist, venue"
-               x-model.debounce.400ms="filters.search" @input="apply()" />
-      </div>
-
-      <div class="filter-group" x-show="view==='browse'">
-        <label>Sort</label>
-        <select x-model="filters.sort" @change="apply()">
-          <option value="date">Date</option>
-          <option value="relevance">Relevance</option>
-          <option value="venue">Venue</option>
-        </select>
-      </div>
-
-      <label class="toggle"><input type="checkbox" x-model="filters.onlyInterested" @change="apply()" /> Interested only</label>
-      <label class="toggle"><input type="checkbox" x-model="filters.showHidden" @change="apply()" /> Show hidden</label>
-    </div>
-  </header>
-
-  <main class="wrap stage" @click="onCardClick($event)">
-    <div class="loading" x-show="loading">Loading the marquee…</div>
-
-    <!-- TONIGHT -->
-    <section x-show="view==='tonight' && !loading">
-      <div class="date-hero">
-        <div class="dow" x-text="heroDow(tonight.date)"></div>
-        <div class="md" x-text="heroMd(tonight.date)"></div>
-        <div class="sub" x-text="(tonight.events.length||'No') + ' show' + (tonight.events.length===1?'':'s') + ' tonight'"></div>
-      </div>
-      <div class="cards">
-        <template x-for="ev in tonight.events" :key="ev.id"><div x-html="card(ev)"></div></template>
-      </div>
-      <template x-if="!tonight.events.length">
-        <div class="empty"><div class="big">DARK TONIGHT</div><div class="hint">Nothing scheduled for today. Try This Week or Top Picks.</div></div>
-      </template>
-    </section>
-
-    <!-- THIS WEEK -->
-    <section x-show="view==='week' && !loading">
-      <h2 class="section-head">This Week</h2>
-      <template x-for="day in week.days" :key="day.date">
-        <div class="day-group" x-show="day.events.length">
-          <div class="day-head" :class="{ 'is-today': day.date===todayStr }">
-            <span class="dlabel" x-text="day.label"></span>
-            <span class="dcount" x-text="day.events.length + ' show' + (day.events.length===1?'':'s')"></span>
-            <span class="rule"></span>
-          </div>
-          <div class="cards">
-            <template x-for="ev in day.events" :key="ev.id"><div x-html="card(ev)"></div></template>
-          </div>
-        </div>
-      </template>
-      <template x-if="!weekHasEvents()">
-        <div class="empty"><div class="big">QUIET WEEK</div><div class="hint">No events Mon–Sun. New shows arrive on the next refresh.</div></div>
-      </template>
-    </section>
-
-    <!-- TOP PICKS -->
-    <section x-show="view==='top' && !loading">
-      <template x-if="top.artists && top.artists.length">
-        <div class="artists-block">
-          <h2 class="section-head">Your Artists · Coming Up</h2>
-          <p class="section-sub">Favorites and artists you've starred, up to a year out.</p>
-          <div class="cards">
-            <template x-for="ev in top.artists" :key="ev.id"><div x-html="card(ev, true)"></div></template>
-          </div>
-        </div>
-      </template>
-      <h2 class="section-head">Top Picks · Next 30 Days</h2>
-      <div class="cards">
-        <template x-for="ev in top.events" :key="ev.id"><div x-html="card(ev, true)"></div></template>
-      </div>
-      <template x-if="!top.events.length">
-        <div class="empty"><div class="big">NO PICKS YET</div><div class="hint">Add favorite artists and genre weights in Settings, or mark a few events Interested to train the engine.</div></div>
-      </template>
-    </section>
-
-    <!-- CURATED (built by the /curate Claude Code routine) -->
-    <section x-show="view==='curated' && !loading">
-      <div class="date-hero">
-        <div class="md" style="color:var(--accent)">CURATED</div>
-        <div class="sub" x-text="curated.criteria ? ('“'+curated.criteria+'”') : 'Run /curate in Claude Code'"></div>
-      </div>
-      <div class="cards">
-        <template x-for="ev in curated.events" :key="ev.id"><div x-html="card(ev, true)"></div></template>
-      </div>
-      <template x-if="!curated.events.length">
-        <div class="empty">
-          <div class="big">NO CURATION YET</div>
-          <div class="hint">Run <code>/curate post-punk under $25, soonest first</code> in Claude Code, then refresh this tab. The routine ranks your events and writes the picks here.</div>
-        </div>
-      </template>
-      <div class="curated-foot" x-show="curated.generated_at" x-text="'Generated ' + relTimeOf(curated.generated_at)"></div>
-    </section>
-
-    <!-- THIS MONTH -->
-    <section x-show="view==='month' && !loading">
-      <div class="cal-head">
-        <button class="cal-nav" @click="shiftMonth(-1)">‹</button>
-        <div class="cal-title" x-text="monthTitle()"></div>
-        <button class="cal-nav" @click="shiftMonth(1)">›</button>
-      </div>
-      <div class="cal-grid">
-        <template x-for="d in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']" :key="d">
-          <div class="cal-dow" x-text="d"></div>
-        </template>
-        <template x-for="(cell, idx) in month.cells" :key="idx">
-          <button class="cal-cell"
-                  :class="{ empty: !cell.date, 'has-events': cell.count>0, 'is-today': cell.date===todayStr, 'is-selected': cell.date===month.selectedDay }"
-                  :disabled="!cell.count" @click="selectDay(cell.date)">
-            <span class="cal-num" x-show="cell.date" x-text="cell.day"></span>
-            <span class="cal-dots" x-show="cell.count>0">
-              <template x-for="n in Math.min(cell.count,4)" :key="n"><span class="cal-dot"></span></template>
-              <span class="cal-more" x-show="cell.count>4" x-text="'+'+(cell.count-4)"></span>
-            </span>
-          </button>
-        </template>
-      </div>
-      <div class="cal-day-detail" x-show="month.selectedDay">
-        <h2 class="section-head" x-text="heroDow(month.selectedDay)+' '+heroMd(month.selectedDay)"></h2>
-        <div class="cards">
-          <template x-for="ev in dayEvents()" :key="ev.id"><div x-html="card(ev)"></div></template>
-        </div>
-      </div>
-    </section>
-
-    <!-- MOVIES (cinema listings; kids' and vapid action films filtered out) -->
-    <section x-show="view==='movies' && !loading">
-      <template x-for="th in movies.theaters" :key="th.id">
-        <div class="date-hero">
-          <div class="md" style="color:var(--accent)">MOVIES</div>
-          <div class="sub">
-            <a :href="th.url" target="_blank" rel="noopener" x-text="th.name + (th.city ? ' · ' + th.city : '')"></a>
-            · kids' movies and vapid action filtered out
-          </div>
-        </div>
-      </template>
-
-      <template x-if="movies.nowPlaying.length">
-        <div class="movie-block">
-          <h2 class="section-head">Now Playing</h2>
-          <div class="movie-grid">
-            <template x-for="m in movies.nowPlaying" :key="m.id"><div x-html="movieCard(m)"></div></template>
-          </div>
-        </div>
-      </template>
-
-      <template x-if="movies.special.length">
-        <div class="movie-block">
-          <h2 class="section-head">Special Screenings</h2>
-          <p class="section-sub">One-nights, repertory and festival screenings — usually gone after a show or two.</p>
-          <template x-for="day in screeningDays()" :key="day.date">
-            <div class="screen-day">
-              <div class="day-head" :class="{ 'is-today': day.date===todayStr }">
-                <span class="dlabel" x-text="day.label"></span><span class="rule"></span>
-              </div>
-              <template x-for="s in day.items" :key="s.key"><div x-html="screeningRow(s)"></div></template>
-            </div>
-          </template>
-        </div>
-      </template>
-
-      <template x-if="movies.comingSoon.length">
-        <div class="movie-block">
-          <h2 class="section-head">Coming Soon</h2>
-          <div class="movie-grid">
-            <template x-for="m in movies.comingSoon" :key="m.id"><div x-html="movieCard(m)"></div></template>
-          </div>
-        </div>
-      </template>
-
-      <template x-if="!movies.nowPlaying.length && !movies.special.length && !movies.comingSoon.length">
-        <div class="empty"><div class="big">NO LISTINGS YET</div><div class="hint">Hit Refresh to pull the cinema schedule.</div></div>
-      </template>
-
-      <div class="movie-filtered" x-show="movies.filtered.length || movies.hidden.length">
-        <button class="linkish" @click="showFilteredMovies=!showFilteredMovies"
-                x-text="(showFilteredMovies ? 'Hide' : 'Show') + ' filtered (' + movies.filtered.length + ')' + (movies.hidden.length ? ' and hidden (' + movies.hidden.length + ')' : '')"></button>
-        <div x-show="showFilteredMovies">
-          <template x-for="m in movies.filtered.concat(movies.hidden)" :key="m.id"><div x-html="filteredRow(m)"></div></template>
-        </div>
-      </div>
-    </section>
-
-    <!-- BROWSE ALL -->
-    <section x-show="view==='browse' && !loading">
-      <h2 class="section-head" x-text="'Browse All · ' + browse.total + ' events'"></h2>
-      <div class="cards">
-        <template x-for="ev in browse.events" :key="ev.id"><div x-html="card(ev, filters.sort==='relevance')"></div></template>
-      </div>
-      <template x-if="!browse.events.length">
-        <div class="empty"><div class="big">NO MATCHES</div><div class="hint">Loosen your filters, or hit Refresh to pull fresh listings.</div></div>
-      </template>
-      <div class="pager" x-show="browse.pages>1">
-        <button @click="setPage(browse.page-1)" :disabled="browse.page<=1">‹ Prev</button>
-        <span x-text="'Page '+browse.page+' / '+browse.pages"></span>
-        <button @click="setPage(browse.page+1)" :disabled="browse.page>=browse.pages">Next ›</button>
-      </div>
-    </section>
-  </main>
-
-  <!-- Manual entry modal -->
-  <div class="modal-backdrop" x-show="showAdd" @keydown.escape.window="showAdd=false" x-cloak>
-    <div class="modal" @click.outside="showAdd=false">
-      <h2>Add an event</h2>
-      <div class="form-grid">
-        <div class="field full"><label>Title *</label><input type="text" x-model="form.title" placeholder="e.g. The Murder City Devils" /></div>
-        <div class="field"><label>Artist</label><input type="text" x-model="form.artist" /></div>
-        <div class="field"><label>Venue *</label><input type="text" x-model="form.venue" placeholder="e.g. Neumos" /></div>
-        <div class="field"><label>City</label><input type="text" x-model="form.city" placeholder="Seattle" /></div>
-        <div class="field"><label>Category</label>
-          <select x-model="form.category"><option value="music">Music</option><option value="comedy">Comedy</option><option value="other">Other</option></select>
-        </div>
-        <div class="field"><label>Date *</label><input type="date" x-model="form.date" /></div>
-        <div class="field"><label>Time</label><input type="time" x-model="form.time" /></div>
-        <div class="field full"><label>Genre tags (comma-separated)</label><input type="text" x-model="form.tags" placeholder="indie rock, punk" /></div>
-        <div class="field full"><label>Ticket URL</label><input type="url" x-model="form.url" placeholder="https://…" /></div>
-        <div class="field"><label>Price range</label><input type="text" x-model="form.price_range" placeholder="$15–20" /></div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" @click="showAdd=false">Cancel</button>
-        <button class="btn btn-accent" @click="submitManual()">Add event</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Bottom status bar -->
-  <div class="statusbar">
-    <div class="wrap">
-      <span class="legend">Sources</span>
-      <template x-for="s in status.sources" :key="s.source_name">
-        <span class="src-pill" :class="s.status" :title="srcTitle(s)">
-          <span class="sdot"></span><span x-text="s.source_name"></span>
-        </span>
-      </template>
-      <template x-if="!status.sources.length"><span class="src-pill"><span class="sdot"></span>No runs yet — hit Refresh now</span></template>
-    </div>
-  </div>
-
-  <div class="toast" x-show="toast" x-text="toast" x-transition x-cloak></div>
+    <div class="sheet-body" id="sheet-body"></div>
+    <div class="sheet-acts" id="sheet-acts" hidden></div>
+  </aside>
+  <div class="toast" id="toast" role="status" hidden></div>
 </body>
 </html>

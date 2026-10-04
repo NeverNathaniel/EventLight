@@ -9,6 +9,8 @@ import {
   getEventById,
   upsertEvent,
   setInterested,
+  setPlan,
+  PLANS,
   setHidden,
   recordSignals,
   getDistinctCities,
@@ -176,22 +178,35 @@ router.post('/events', (req, res) => {
   res.status(result === 'added' ? 201 : 200).json({ result });
 });
 
-// ── Actions: Interested / Hide ───────────────────────────────────────────
+// ── Actions: Interested / Going / Hide ───────────────────────────────────
+// Behavioral signal: when a show is newly starred, record its genre tags + artist.
+function learnFrom(event) {
+  const tags = String(event.genre_tags || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (event.artist) tags.push(event.artist);
+  if (tags.length) recordSignals(tags);
+}
+
 router.post('/events/:id/interested', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const value = req.body?.value !== false; // default true
   const event = setInterested(id, value);
   if (!event) return res.status(404).json({ error: 'not found' });
+  if (value) learnFrom(event);
+  res.json({ event });
+});
 
-  // Behavioral signal: when marking interested, record genre tags + artist.
-  if (value) {
-    const tags = String(event.genre_tags || '')
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
-    if (event.artist) tags.push(event.artist);
-    if (tags.length) recordSignals(tags);
-  }
+// Your plan for a show: { plan: 'going' | 'maybe' | null }.
+router.post('/events/:id/plan', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const plan = req.body?.plan ?? null;
+  if (!PLANS.includes(plan)) return res.status(400).json({ error: "plan must be 'going', 'maybe' or null" });
+  const before = getEventById(id);
+  if (!before) return res.status(404).json({ error: 'not found' });
+  const event = setPlan(id, plan);
+  if (plan && !before.interested) learnFrom(event);
   res.json({ event });
 });
 

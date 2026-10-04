@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS events (
   price_range   TEXT,
   lineup        TEXT NOT NULL DEFAULT '[]', -- JSON array of artist names, headliner first
   artist_tags   TEXT NOT NULL DEFAULT '',   -- genre tags looked up for the lineup (enrichment)
-  interested    INTEGER NOT NULL DEFAULT 0,  -- boolean
+  interested    INTEGER NOT NULL DEFAULT 0,  -- boolean: starred (shown as Maybe)
+  going         INTEGER NOT NULL DEFAULT 0,  -- boolean: you're going (always also interested)
   hidden        INTEGER NOT NULL DEFAULT 0,  -- boolean
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))

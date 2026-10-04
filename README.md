@@ -1,8 +1,12 @@
 # EventLight
 
-A self-hosted dashboard for live **music** and **comedy** across **Seattle, Tacoma, and the South Sound**. EventLight pulls events from APIs, RSS/iCal feeds, and headless web scrapers on a schedule, merges them into one deduplicated list, scores them against your taste, and presents everything in a dark "venue marquee" dashboard.
+A self-hosted dashboard for live **music** and **comedy** across **Seattle, Tacoma, and the South Sound**. EventLight pulls events from APIs, RSS/iCal feeds, and headless web scrapers on a schedule, merges them into one deduplicated list, scores them against your taste, and shows you the week at a glance, with your top picks printed as tickets.
 
-- **Tonight / This Week / Top Picks / Curated / This Month / Movies / Browse All** views
+- **Week** — the next seven days from today: your top picks, each night's short list (shows and films), and your artists' shows further out
+- **Explore** — search and browse everything, as a list or a month calendar; **Film** has the cinema listings
+- **Saved** — the shows you're **Going** to and the ones marked **Maybe**, plus Claude's curated lists
+- **Tap into anything** — a show, a night, an artist or a venue opens with the details: who's on the bill, why it's a pick, what else is on that night, and the artist's other dates
+- **Going / Maybe** — mark your plans; Going shows feed a calendar link you can subscribe to on your phone
 - **Movies** — what's playing at The Grand Cinema (Tacoma), with kids' movies and vapid action movies filtered out
 - **Preference engine** — favorite artists, "sounds like your favorites" discovery, genre weights, and learning from what you star — every pick says *why* it ranks
 - **Alerts** — a push on your phone when a favorite artist has a new show, plus a weekly Top Picks digest (via [ntfy](https://ntfy.sh), free, no account)
@@ -88,7 +92,7 @@ Open **http://\<host\>:3000**.
 ### Configuration
 
 - **Port** — set `PORT=8080` in `.env` to publish on a different host port (the app always listens on 3000 inside the container).
-- **Timezone** — set `TZ=America/Los_Angeles` (the default) in `.env`. This matters: the *Tonight* and *This Week* views compute "today" in the container's timezone, so a wrong `TZ` shifts every view by a day around midnight.
+- **Timezone** — set `TZ=America/Los_Angeles` (the default) in `.env`. This matters: the Week screen computes "today" in the container's timezone, so a wrong `TZ` shifts every view by a day around midnight.
 - All other variables from the [Configure `.env`](#configure-env) table apply as-is.
 
 ### Day-2 operations
@@ -108,7 +112,7 @@ git pull && docker compose up --build -d         # upgrade to a new version
 | --- | --- |
 | Container exits immediately, logs mention `.env` | `.env` was auto-created as a directory — `docker compose down`, `rmdir .env`, `cp .env.example .env`, `docker compose up -d` |
 | Scrapers crash on heavy pages / "Target crashed" | Increase `shm_size` in `docker-compose.yml` (already 1 GB by default) |
-| *Tonight* shows the wrong day's events | Set `TZ` in `.env` to your zone and restart |
+| The Week starts on the wrong day | Set `TZ` in `.env` to your zone and restart |
 | Port already in use | Change `PORT` in `.env` and `docker compose up -d` again |
 | `docker ps` shows `unhealthy` | `docker compose logs` — the API isn't responding on 3000 inside the container |
 
@@ -157,10 +161,10 @@ Each source is an adapter in `src/adapters/`. The scheduler runs them all every 
 
 | Type | Sources |
 | --- | --- |
-| **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy, the next 6 months, parking/VIP add-ons filtered out), Bandsintown (resolves your favorite artists and artists you've marked _Interested_) |
+| **APIs** | Ticketmaster (latlong + 30mi radius, Music & Comedy, the next 6 months, parking/VIP add-ons filtered out), Bandsintown (resolves your favorite artists and artists you've marked _Going_ or _Maybe_) |
 | **Feeds** | Configured in `feeds.json` — Tacoma Comedy Club and Emerald City Comedy Club (JSON-LD); Conor Byrne Pub, Jazzbones, New Frontier Lounge, Real Art Tacoma and Tracyton Movie House (VenuePilot); The Valley (Squarespace). Add new ones with **Add a Venue by URL** |
 | **Scrapers** | Configured in `scrapers.json` — Tractor Tavern, Skylark, McMenamins Elks Temple (Tacoma), Showbox (every AEG Seattle room, paged through "Load More"), Neumos (paged), The Crocodile, Clock-Out Lounge, Airport Tavern, and Cryptatropa (Olympia) seeded with selectors verified against the live sites (2026-10). Several more ship **disabled** with notes: venues better served by the Ticketmaster API, JS-rendered sites whose selectors need in-browser tuning first, and dead/expired domains |
-| **Manual** | The **＋ Add** button in the UI |
+| **Manual** | **Explore → Add it yourself** in the UI |
 
 > **Few Seattle/Tacoma venues publish a classic RSS or iCal feed** — the big rooms sell through Ticketmaster or AXS, and small ones run their calendars on Squarespace, WordPress or a ticketing widget. Get the big rooms from the **Ticketmaster API** (one key covers every venue that sells through it), and the small ones from the structured feeds those platforms expose (VenuePilot, Squarespace, WordPress's Events Calendar) or a **scraper**. **Add a Venue by URL** detects whichever method a given site supports.
 
@@ -235,13 +239,13 @@ The scraper validates each config before spending a page load on it, blocks imag
 
 After a successful scrape, or a successful iCal / JSON-LD / VenuePilot feed run (sources that list a venue's whole calendar), upcoming listings that source no longer shows — cancelled or moved — are removed, unless you starred or hid them. RSS feeds and APIs are never pruned this way, since they only return a window of results.
 
-**Selector drift** (a site changing its markup) is the usual cause of a scraper returning zero events. EventLight logs this clearly and distinguishes the two cases — *no items matched* (fix `selectors.item`) vs. *items matched but none had a usable title + date* (fix the `name`/`date` selectors). Check the status bar at the bottom of the dashboard, or **Settings → Last Refresh by source**, and `GET /api/status/logs` for the raw log.
+**Selector drift** (a site changing its markup) is the usual cause of a scraper returning zero events. EventLight logs this clearly and distinguishes the two cases — *no items matched* (fix `selectors.item`) vs. *items matched but none had a usable title + date* (fix the `name`/`date` selectors). The dashboard's top line says when sources need a look; **Settings → Last Refresh by source** has the details, and `GET /api/status/logs` the raw log.
 
 ---
 
 ## Manual refresh
 
-- **UI:** the **Refresh now** button on the dashboard, or **Settings → Maintenance** to run all sources or a single adapter.
+- **UI:** **Settings → Maintenance** runs all sources or a single adapter.
 - **CLI:** `npm run refresh` runs every adapter once and prints a summary, then exits.
 - **Artist backfill:** `npm run enrich` (Docker: `docker compose exec eventlight npm run enrich`) spends up to 1000 lookups (`-- --max N` to change) filling the artist cache in one go — worth running once after the first refresh, since a scheduled refresh only spends `ENRICH_MAX_LOOKUPS`.
 
@@ -249,12 +253,12 @@ After a successful scrape, or a successful iCal / JSON-LD / VenuePilot feed run 
 
 ## Preference engine
 
-Scores are computed at query time and used for **Top Picks** and the **relevance** sort. Each part that fires adds a reason, shown on the card — _"PUP is a favorite"_, _"Movements shares fans with Joyce Manor & Modern Baseball (≈ PUP)"_ — and highlighted genre tags.
+Scores are computed at query time and used for **Top picks** and Explore's **Best match** sort. Each part that fires adds a reason, shown on the ticket and in the show's details — _"PUP is a favorite"_, _"Movements shares fans with Joyce Manor & Modern Baseball (≈ PUP)"_ — and highlighted genre tags.
 
 | Signal | What it does | Points |
 | --- | --- | --- |
 | **Favorite artists** | A favorite on the bill (Settings → Favorite Artists, weighted 1–5). Never decays. | headlining 12–20, opening 6–10 |
-| **Starred artists** | The headliner of any event you've marked _Interested_ counts like a lighter favorite. | 8 / 4 |
+| **Starred artists** | The headliner of any event you've marked _Going_ or _Maybe_ counts like a lighter favorite. | 8 / 4 |
 | **Sounds like** | A lineup act is similar to a favorite or starred artist (see below). | up to 9 (half for openers) |
 | **Genre weights** | Your genre weights (1–5) vs. the event's tags — the source's own plus genres looked up for the lineup. Matching is whole-word and one-way: a `punk` weight matches `pop punk`, but `indie rock` doesn't match plain `rock`. Best match + ½·second + ¼·third, so a pile of loose tags can't beat a square fit. | up to ~8.75 |
 | **Learned tags** | Genre tags from events you star, fading with an 8-week half-life. | up to 4 |
@@ -271,7 +275,7 @@ Scores are computed at query time and used for **Top Picks** and the **relevance
 
 **Sounds like** compares each artist's similar-artist list with each favorite's, by cosine similarity with inverse-document-frequency weighting. That catches direct links (an act on a favorite's list) and shared-fan links (Movements' listeners also play Joyce Manor and Modern Baseball, both close to PUP), while hub artists that sit on every list — Radiohead, The Beatles — count for little.
 
-**Top Picks** shows the best-scoring events in the next 30 days, plus a **Your Artists** section: every show by a favorite or starred artist in the next year, since those tours announce months ahead.
+**Top picks** on the Week screen are the best-scoring shows in the next seven days (a score of 8 or more, roughly a favorite or sound-alike on the bill, or a strong genre match close to home). **Further out** lists every show by a favorite or starred artist after that, up to a year ahead, since those tours announce months ahead. The weekly digest and `/api/views/top-picks` look 30 days out.
 
 **Taste-profile seeding:** if a `taste-profile.json` exists at the repo root, it's imported idempotently on startup. Its genres (derived from the owner's Spotify top artists/tracks) become genre weights, and its artists (Spotify plus the owner's own list) become favorite artists.
 - **Genres** are re-applied when `generated_at` changes.
@@ -300,7 +304,7 @@ Anyone who knows a topic on ntfy.sh can read it, which is why the generated one 
 
 ## Movies
 
-The **Movies** tab lists everything showing at [The Grand Cinema](https://grandcinema.com) in Tacoma over the next six weeks. It has three sections:
+Everything showing at [The Grand Cinema](https://grandcinema.com) in Tacoma over the next six weeks is in **Explore → Film**, and on the Week screen alongside shows: a one-night screening can make a night's short list, and every film showing that night is in its day view. Explore → Film has three sections:
 
 - **Now Playing**: current runs, leaving-soonest first.
 - **Special Screenings**: one-nights, repertory, and the Tacoma Film Festival (films with three or fewer showtimes), as a day-by-day program. A regular run stays in Now Playing through its last days.
@@ -308,7 +312,7 @@ The **Movies** tab lists everything showing at [The Grand Cinema](https://grandc
 
 Each film shows its poster, rating, runtime, director, cast, synopsis, showtimes by day (in your browser's timezone), the trailer, and a ticket link.
 
-**Filtered out** (`src/cinema/filter.js`). Every decision carries a reason, and **Show filtered** at the bottom of the tab lists what was left out and why.
+**Filtered out** (`src/cinema/filter.js`). Every decision carries a reason, and **Show what's left out** at the bottom of Explore → Film lists what was left out and why.
 
 - **Kids' movies**:
   - rated G, if released since 1990 (*2001: A Space Odyssey* stays);
@@ -322,7 +326,7 @@ Each film shows its poster, rating, runtime, director, cast, synopsis, showtimes
   - Other action films need Metacritic ≥ 65 or Rotten Tomatoes ≥ 80.
   - An action film with no scores on record (a restoration, a new import) gets the benefit of the doubt unless it's a superhero film.
 
-Genres, franchise and critic scores come from [Wikidata](https://www.wikidata.org/), looked up by the TMDB id the theater supplies. It's free, needs no key, and is cached for a week. The ✕ on any film hides it; hidden films are listed under **Show filtered** with a button to bring them back, and stay hidden even if the film briefly drops out of a refresh.
+Genres, franchise and critic scores come from [Wikidata](https://www.wikidata.org/), looked up by the TMDB id the theater supplies. It's free, needs no key, and is cached for a week. **Hide film** in a film's details hides it; hidden films are listed under **Show what's left out** with a button to bring them back, and stay hidden even if the film briefly drops out of a refresh.
 
 **How it's fetched** (`src/cinema/indy.js`). The Grand's website runs on the Indy Systems ticketing platform, whose frontend loads showtimes from a GraphQL endpoint on the theater's own domain. EventLight makes the same requests the site does: one to list the dates with showtimes, then one per date. That's a few dozen small requests per refresh. Note that the theater's `robots.txt` disallows `/graphql` for crawlers. Other Indy Systems cinemas can be added to `THEATERS` in `src/cinema/index.js`; their `site-id` / `circuit-id` are the headers their website sends.
 
@@ -340,7 +344,7 @@ What happens:
 
 1. The command runs `npm run export-events`, dumping upcoming events to `data/events-export.json` (id, title, lineup, venue, date, genres, price, and EventLight's own preference score with its reasons).
 2. Claude reads that file, selects and **ranks** the events that match your request, and writes `data/curated.json` — each pick with a one-line reason.
-3. Open the **Curated** tab in the dashboard (or refresh it) to see the ranked picks with Claude's reasoning. Interested/Hide work there like any other view.
+3. Open **Saved** in the dashboard to see the ranked picks under **Curated**, with Claude's reasoning.
 
 It's intentionally simple — a single-user, private-repo workflow. The routine lives in `.claude/commands/curate.md`; edit it to change how curation reasons. You can also run the export manually with `npm run export-events` and consume the JSON however you like.
 
@@ -352,15 +356,16 @@ It's intentionally simple — a single-user, private-repo workflow. The routine 
 src/
   adapters/        one file per source + the runAll() orchestrator
   db/              SQLite setup, schema, migrations, query helpers
-  routes/          Express handlers (events, settings, refresh, status, discover)
+  routes/          Express handlers (events, week, settings, refresh, status, discover, movies)
   scheduler/       node-cron job + manual triggers
   scoring/         preference engine + close-to-home distances
   enrich/          artist genres (MusicBrainz) + similar artists (ListenBrainz)
   cinema/          movie listings (The Grand Cinema via Indy Systems), Wikidata facts, kids/action filter
   lineup.js        parse the bill (headliner, support) out of an event title
+  week.js          the Week screen, plus the show, night, artist and venue details
   cli/             refresh + export-events commands
   discovery.js     paste-a-URL source auto-discovery (RSS/iCal/JSON-LD/scrape)
-  public/          frontend (HTML, CSS, vanilla JS + Alpine.js, vendored)
+  public/          frontend (HTML, CSS, vanilla JS; Settings uses Alpine.js, vendored)
 .claude/
   commands/        /curate Claude Code routine
 feeds.json         RSS/iCal/JSON-LD feed config (editable in UI)
@@ -378,8 +383,16 @@ data/events.db     SQLite database (created at runtime, gitignored)
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
+| `GET` | `/api/views/brief` | The Week screen: the next 7 days from today (`days`, each with its short list), `picks`, and `further` (your artists' shows after that) |
+| `GET` | `/api/views/day?date=YYYY-MM-DD` | One night: shows best-first, and films |
+| `GET` | `/api/views/saved` | Upcoming `going` and `maybe` shows |
+| `GET` | `/api/events/:id/details` | A show with its lineup (genres, favorites, sound-alikes), what else is on that night, and distance from home |
+| `GET` | `/api/artist?name=…` | An artist: how they connect to your taste, and their upcoming dates |
+| `GET` | `/api/venue?name=…` | A venue's next shows and distance from home |
+| `POST` | `/api/events/:id/plan` | Set your plan: `{ "plan": "going" }`, `"maybe"` or `null`. Going also stars the show |
+| `GET` | `/api/calendar/going.ics` | Your Going shows, as a calendar feed to subscribe to |
 | `GET` | `/api/views/tonight` | Today's events |
-| `GET` | `/api/views/week` | This week, grouped by day |
+| `GET` | `/api/views/week` | Monday to Sunday of the current week, grouped by day |
 | `GET` | `/api/views/top-picks` | Highest-scored events, next 30 days, plus `artists`: favorite/starred artists' shows in the next year |
 | `GET` | `/api/views/curated` | The `/curate` routine's ranked picks (from `data/curated.json`) |
 | `GET` | `/api/views/movies` | Cinema listings: `nowPlaying`, `special`, `comingSoon`, `filtered` (with reasons), `hidden` |
@@ -413,7 +426,7 @@ All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInter
 npm test
 ```
 
-Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, and the `.ics` builder.
+Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, the Week screen (the rolling seven days, top picks, films alongside shows, Going / Maybe, show and artist details), and the `.ics` builder.
 
 GitHub Actions runs the same suite on every pull request and every push to `main` (`.github/workflows/test.yml`).
 

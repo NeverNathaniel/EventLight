@@ -238,11 +238,25 @@ export function getEventById(id) {
 }
 
 // ── User actions ────────────────────────────────────────────────────────
+// Un-starring a show also drops Going: Going is a stronger kind of star.
 const setInterestedStmt = db.prepare(
-  "UPDATE events SET interested = ?, updated_at = datetime('now') WHERE id = ?"
+  `UPDATE events SET interested = @value, going = CASE WHEN @value = 1 THEN going ELSE 0 END,
+     updated_at = datetime('now') WHERE id = @id`
 );
 export function setInterested(id, value) {
-  setInterestedStmt.run(value ? 1 : 0, id);
+  setInterestedStmt.run({ value: value ? 1 : 0, id });
+  return getEventById(id);
+}
+
+// Your plan for a show: 'going', 'maybe' or null (neither). Going also stars
+// the show, so everything that learns from or protects starred shows
+// (scoring, alerts, pruning, Bandsintown lookups) treats it the same.
+export const PLANS = ['going', 'maybe', null];
+const setPlanStmt = db.prepare(
+  "UPDATE events SET interested = @interested, going = @going, updated_at = datetime('now') WHERE id = @id"
+);
+export function setPlan(id, plan) {
+  setPlanStmt.run({ id, interested: plan ? 1 : 0, going: plan === 'going' ? 1 : 0 });
   return getEventById(id);
 }
 
