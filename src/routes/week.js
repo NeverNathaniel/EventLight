@@ -4,7 +4,8 @@ import express from 'express';
 import { queryEvents } from '../db/queries.js';
 import { buildIcs } from '../ics.js';
 import { todayISO, addDays } from '../dates.js';
-import { weekBrief, dayView, eventDetails, artistView, venueView, savedLists } from '../week.js';
+import { weekBrief, dayView, eventDetails, artistView, venueView, savedLists, profileView } from '../week.js';
+import { artistProfile } from '../enrich/profile.js';
 
 const router = express.Router();
 
@@ -31,6 +32,18 @@ router.get('/artist', (req, res) => {
   const name = String(req.query.name || '').trim();
   if (!name) return res.status(400).json({ error: 'name is required' });
   res.json(artistView(name));
+});
+
+// Looks the artist up (MusicBrainz, Wikipedia, Apple Music) if their cached
+// profile is missing or stale. Takes a second or two the first time.
+router.get('/artist/profile', async (req, res, next) => {
+  const name = String(req.query.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  try {
+    res.json(profileView(await artistProfile(name)));
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.get('/venue', (req, res) => {
