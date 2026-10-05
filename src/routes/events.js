@@ -20,6 +20,10 @@ import {
 import { scoreEvents, scoreAndRank } from '../scoring/engine.js';
 import { localISO, todayISO, addDays } from '../dates.js';
 import { topPicks } from '../picks.js';
+import { annotate } from '../annotate.js';
+import { filmsByDay, theaterHorizons } from '../week.js';
+import { getMovies } from '../db/movies.js';
+import { DAYS_AHEAD } from '../cinema/index.js';
 
 const router = express.Router();
 
@@ -58,6 +62,29 @@ router.get('/filters', (req, res) => {
 });
 
 // ── Browse All (paginated, filterable, sortable) ─────────────────────────
+// Films aren't events, so they come alongside: with `withFilms=1` (Explore's
+// "Everything" list by date) the response also carries the films showing
+// from `filmsFrom` (default: the requested start date) through the last date
+// on this page — or through the end of the cinema listings on the last page —
+// keyed by date, plus `filmsTo`. The client asks for the next page's films
+// from the day after `filmsTo`, so each date gets its films exactly once.
+function filmsFor(filters, events, { from, last }) {
+  const to = last ? addDays(todayISO(), DAYS_AHEAD) : events[events.length - 1]?.date;
+  if (!to || to < from) return { films: {}, filmsTo: to && to > from ? to : addDays(from, -1) };
+  const movies = getMovies();
+  const films = {};
+  const all = [];
+  for (const [date, list] of filmsByDay(from, to, Date.now(), movies)) {
+    const shown = list.filter((f) => filters.city === 'all' || f.city === filters.city);
+    if (shown.length) {
+      films[date] = shown;
+      all.push(...shown);
+    }
+  }
+  annotate(all, { horizonByTheater: theaterHorizons(movies) });
+  return { films, filmsTo: to };
+}
+
 router.get('/events', (req, res) => {
   const filters = parseFilters(req.query);
   const sort = ['date', 'venue', 'relevance'].includes(req.query.sort)
@@ -66,6 +93,7 @@ router.get('/events', (req, res) => {
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
   const total = countEvents(filters);
+  const pages = Math.ceil(total / pageSize);
 
   let events;
   if (sort === 'relevance') {
@@ -77,8 +105,15 @@ router.get('/events', (req, res) => {
       queryEvents(filters, { sort, limit: pageSize, offset: (page - 1) * pageSize })
     );
   }
+  events = annotate(events.map((e) => ({ ...e, kind: e.category })));
 
-  res.json({ events, total, page, pageSize, pages: Math.ceil(total / pageSize) });
+  const body = { events, total, page, pageSize, pages };
+  if (req.query.withFilms === '1' && sort === 'date' && filters.category === 'all' && !filters.search) {
+    const asked = /^\d{4}-\d{2}-\d{2}$/.test(req.query.filmsFrom || '') ? req.query.filmsFrom : null;
+    const from = asked || filters.dateFrom || todayISO();
+    Object.assign(body, filmsFor(filters, events, { from, last: page >= pages }));
+  }
+  res.json(body);
 });
 
 // ── View: Tonight (today, sorted by time) ────────────────────────────────
@@ -150,6 +185,13 @@ router.get('/views/month', (req, res) => {
 
   const counts = {};
   for (const e of events) counts[e.date] = (counts[e.date] || 0) + 1;
+  // Each film counts once on each day it shows, as on the Week strip.
+  if (filters.category === 'all' && !filters.search) {
+    for (const [date, films] of filmsByDay(`${month}-01`, `${month}-31`)) {
+      const n = films.filter((f) => filters.city === 'all' || f.city === filters.city).length;
+      if (n) counts[date] = (counts[date] || 0) + n;
+    }
+  }
   res.json({ month, counts, events });
 });
 

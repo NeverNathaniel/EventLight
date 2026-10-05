@@ -8,6 +8,7 @@ import { migrate } from '../db/migrate.js';
 import { queryEvents } from '../db/queries.js';
 import { scoreEvents } from '../scoring/engine.js';
 import { DATA_DIR } from '../config.js';
+import { kindOf, flagsOf } from '../kinds.js';
 
 function todayISO() {
   const d = new Date();
@@ -30,6 +31,8 @@ function main() {
     date: e.date,
     time: e.time,
     category: e.category,
+    kind: kindOf(e).label,
+    flags: flagsOf(e).map((f) => f.label),
     lineup: e._lineup,
     genre_tags: e._tags.join(', '),
     price_range: e.price_range,

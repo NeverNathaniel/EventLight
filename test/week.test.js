@@ -1,5 +1,6 @@
-// Tests for the Week screen and the detail sheet: the rolling seven days, top
-// picks, films alongside shows, Going / Maybe, and the show/artist lookups.
+// Tests for the Week screen, the day page and the detail sheet: the rolling
+// seven days, top picks, each day's picks, films alongside shows, Going /
+// Maybe, and the show/artist lookups.
 // Runs against a throwaway in-memory database.
 import './helpers/memory-db.js'; // must stay the first import
 import { test } from 'node:test';
@@ -9,7 +10,7 @@ const { migrate } = await import('../src/db/migrate.js');
 const { default: db } = await import('../src/db/index.js');
 const { upsertEvent, setManualGenre, setPlan, setInterested } = await import('../src/db/queries.js');
 const { setFavoriteArtist } = await import('../src/db/artists.js');
-const { weekBrief, dayView, eventDetails, artistView, savedLists, filmsByDay, PICK_MIN } = await import(
+const { weekBrief, dayPage, eventDetails, artistView, savedLists, filmsByDay, PICK_MIN } = await import(
   '../src/week.js'
 );
 
@@ -58,7 +59,7 @@ test('the week is the next seven days from today, not Monday to Sunday', () => {
   assert.equal(brief.days.length, 7);
   assert.equal(brief.days[0].date, '2030-01-05');
   assert.equal(brief.days[6].date, '2030-01-11');
-  const ids = brief.days.flatMap((d) => d.best.map((e) => e.id));
+  const ids = brief.days.flatMap((d) => d.picks.map((e) => e.id));
   assert.ok(!ids.includes(yesterday.id), 'yesterday is gone');
   assert.ok(ids.includes(lastDay.id), 'the seventh day is in');
   assert.ok(!ids.includes(nextWeek.id), 'the eighth day is out');
@@ -77,7 +78,8 @@ test('top picks are strong matches in the week, best first, and light up their d
 
 test("a night with nothing that matches has an empty short list but still counts what's on", () => {
   const monday = weekBrief({ today: TODAY, now: NOW, movies: [] }).days[2];
-  assert.deepEqual(monday.best, []);
+  assert.deepEqual(monday.picks, []);
+  assert.equal(monday.picksLabel, 'none');
   assert.equal(monday.total, 1);
   assert.equal(monday.more, 1);
 });
@@ -91,7 +93,7 @@ test("further out lists your artists' shows after the week, including as support
   assert.ok(!ids.includes(nextWeek.id), 'no favorite on the bill');
 });
 
-test('films sit alongside shows: one entry per film per day, one-offs can make the short list', () => {
+test('films sit alongside shows: one entry per film per day, one-offs can be a pick', () => {
   const films = filmsByDay('2030-01-05', '2030-01-11', NOW, MOVIES);
   const sunday = films.get('2030-01-06');
   assert.equal(sunday.length, 2);
@@ -99,23 +101,62 @@ test('films sit alongside shows: one entry per film per day, one-offs can make t
   assert.equal(paris.kind, 'film');
   assert.equal(paris.special, true);
   assert.deepEqual(paris.times, ['19:00']);
-  assert.equal(paris._reasons[0].text, 'One night only');
+  assert.equal(paris.upcoming, 1);
   const run = sunday.find((f) => f.title === 'The Long Field');
   assert.deepEqual(run.times, ['16:00', '19:00']);
+  assert.equal(run.firstDate, '2030-01-05');
+  assert.equal(run.lastDate, '2030-01-10');
 
   const brief = weekBrief({ today: TODAY, now: NOW, movies: MOVIES });
   const day = brief.days[1];
-  assert.ok(day.best.some((e) => e.title === 'Paris, Texas'), 'the one-off screening makes Sunday’s list');
-  assert.ok(!day.best.some((e) => e.title === 'The Long Field'), 'a regular run does not');
+  const paris2 = day.picks.find((e) => e.title === 'Paris, Texas');
+  assert.ok(paris2, 'the one-off screening is one of Sunday’s picks');
+  assert.equal(paris2._role.label, 'The pick', 'the best thing on a quiet Sunday leads it, film or not');
+  assert.ok(!day.picks.some((e) => e.title === 'The Long Field'), 'a regular run on an ordinary day is not');
   assert.equal(day.total, 2);
+  assert.deepEqual(day.films, { count: 2, top: [{ id: 'film-2-2030-01-06', title: 'The Long Field', note: null }] },
+    'the films line names the films that aren’t picks');
 });
 
-test('the day view ranks shows best first and lists that night’s films', () => {
+test('a day’s picks are the same on the Week screen and on its own page', () => {
+  const brief = weekBrief({ today: TODAY, now: NOW, movies: MOVIES });
+  for (const d of brief.days) {
+    const page = dayPage(d.date, { today: TODAY, now: NOW, movies: MOVIES });
+    assert.deepEqual(page.picks.map((e) => e.id), d.picks.map((e) => e.id), d.date);
+    assert.equal(page.dek, d.dek);
+  }
+});
+
+test('a day’s page: picks first, then everything else in groups, with the days around it', () => {
   add({ title: 'Open Mic', date: '2030-01-05', category: 'comedy' });
-  const day = dayView('2030-01-05', { now: NOW, movies: MOVIES });
-  assert.equal(day.shows[0].id, pupTonight.id);
-  assert.ok(day.shows.every((e, i, all) => i === 0 || all[i - 1]._score >= e._score));
-  assert.deepEqual(day.films.map((f) => f.title), ['The Long Field']);
+  const day = dayPage('2030-01-05', { today: TODAY, now: NOW, movies: MOVIES });
+  assert.equal(day.picks[0].id, pupTonight.id);
+  assert.equal(day.picks[0]._role.label, 'The pick');
+  assert.equal(day.picks[0]._kind.label, 'Music');
+  const group = (key) => day.groups.find((g) => g.key === key);
+  assert.deepEqual(group('film').items.map((f) => f.title), ['The Long Field'], 'the regular run is listed under At the movies');
+  assert.deepEqual(group('comedy').items.map((e) => e.title), ['Open Mic']);
+  assert.ok(!day.groups.some((g) => g.items.some((e) => e.id === pupTonight.id)), 'a pick isn’t listed twice');
+  assert.equal(day.prev, null, 'no going back before today');
+  assert.equal(day.next.date, '2030-01-06');
+  assert.deepEqual(day.strip.map((d) => d.date), ['2030-01-05', '2030-01-06', '2030-01-07', '2030-01-08', '2030-01-09', '2030-01-10', '2030-01-11']);
+  assert.equal(day.strip[0].hasPick, true);
+  assert.match(day.dek, /^A favorite at Test Hall/);
+
+  // A day past the week centres the strip on it.
+  const later = dayPage('2030-01-20', { today: TODAY, now: NOW, movies: [] });
+  assert.equal(later.strip[0].date, '2030-01-17');
+  assert.equal(later.prev.date, '2030-01-19');
+});
+
+test('on today’s page, a show that started over an hour ago is folded away', () => {
+  add({ title: 'Matinee Band', date: '2030-01-05', time: '13:00' });
+  const at = (h) => new Date(2030, 0, 5, h, 0).getTime();
+  const early = dayPage('2030-01-05', { today: TODAY, now: at(12), movies: [] });
+  assert.ok(!early.started.some((e) => e.title === 'Matinee Band'));
+  const late = dayPage('2030-01-05', { today: TODAY, now: at(15), movies: [] });
+  assert.ok(late.started.some((e) => e.title === 'Matinee Band'));
+  assert.ok(!late.groups.some((g) => g.items.some((e) => e.title === 'Matinee Band')));
 });
 
 test('Going also stars a show; Maybe is the star alone; clearing drops both', () => {
@@ -152,6 +193,8 @@ test('show details name who is on the bill and what else is on that night', () =
   assert.equal(details.lineup[1].favorite, true);
   assert.equal(details.lineup[0].favorite, false);
   assert.equal(details.event.kind, 'music');
+  assert.equal(details.event._kind.label, 'Music');
+  assert.ok('descriptor' in details.lineup[0] && Array.isArray(details.lineup[0].fans));
   assert.equal(details.home.nearby, false, 'Seattle is not close to a Tacoma home');
 
   const tonight = eventDetails(pupTonight.id, { today: TODAY, now: NOW });

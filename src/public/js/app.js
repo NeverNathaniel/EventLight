@@ -1,10 +1,14 @@
-// EventLight dashboard — Week, Explore and Saved, plus the detail sheet that
-// slides up over them (a show, a film, a night, an artist, a venue).
-// A plain ES module with no build step: views render fetched JSON into HTML
-// strings, and one delegated click handler drives every button.
+// EventLight dashboard — Week, a page for each day, Explore and Saved, plus
+// the detail sheet that slides up over them (a show, a film, an artist, a
+// venue). A plain ES module with no build step: views render fetched JSON
+// into HTML strings, and one delegated click handler drives every button.
+//
+// The server dresses every listing (src/annotate.js): what it is (_kind,
+// _flags, _regular), how it reads in a list (_headline, _feel — genres,
+// sounds-like, a song to preview) and how it ranks (_pick, _role).
 
-const PICK = 8; // a top pick's minimum score (PICK_MIN in src/week.js)
-const GOOD = 3; // shows below this are dimmed in lists (GOOD_MIN in src/week.js)
+const PICK = 8; // a top pick's minimum (PICK_MIN in src/week.js)
+const GOOD = 3; // listings below this are dimmed (GOOD_MIN in src/week.js)
 
 const view = document.getElementById('view');
 const sheetEl = document.getElementById('sheet');
@@ -14,9 +18,15 @@ const backdrop = document.getElementById('backdrop');
 
 const state = {
   route: 'week',
+  hash: '',
   today: localISO(new Date()),
   brief: null,
   morePicks: false,
+  day: null,
+  dayData: null,
+  dayFrom: null, // 'week' | 'explore' when the day page was opened from inside the app
+  open: new Set(), // day-page folds the person opened (groups, regulars, started)
+  scroll: {},
   saved: null,
   curated: null,
   facets: { cities: [] },
@@ -24,7 +34,7 @@ const state = {
   showLeftOut: false,
   explore: {
     q: '', type: 'all', city: 'all', sort: 'date', mode: 'list',
-    page: 1, pages: 1, total: 0, events: [], loading: false,
+    page: 1, pages: 1, total: 0, events: [], films: {}, filmsTo: null, loading: false,
     month: localISO(new Date()).slice(0, 7), counts: {},
   },
 };
@@ -67,7 +77,9 @@ function addDays(iso, n) {
   d.setDate(d.getDate() + n);
   return localISO(d);
 }
+const isISODate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && !Number.isNaN(toDate(s).getTime());
 const dow = (iso) => toDate(iso).toLocaleDateString('en-US', { weekday: 'short' });
+const weekday = (iso) => toDate(iso).toLocaleDateString('en-US', { weekday: 'long' });
 const dayNum = (iso) => toDate(iso).getDate();
 const monthDay = (iso) => toDate(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const shortDate = (iso) => toDate(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -77,8 +89,13 @@ function dayName(iso) {
   const today = state.today;
   if (iso === today) return 'Tonight';
   if (iso === addDays(today, 1)) return 'Tomorrow';
-  if (iso > today && iso <= addDays(today, 6)) return toDate(iso).toLocaleDateString('en-US', { weekday: 'long' });
+  if (iso > today && iso <= addDays(today, 6)) return weekday(iso);
   return shortDate(iso);
+}
+// "tonight", "for tomorrow", "for Friday", "for Sat, Nov 14".
+function forDay(iso) {
+  const name = dayName(iso);
+  return name === 'Tonight' ? 'tonight' : `for ${name === 'Tomorrow' ? 'tomorrow' : name}`;
 }
 
 // "20:00" → "8:00p".
@@ -103,6 +120,7 @@ function relTime(iso) {
 }
 
 const kindOf = (e) => e.kind || e.category;
+const isFilm = (e) => kindOf(e) === 'film';
 function lineupOf(e) {
   if (Array.isArray(e._lineup)) return e._lineup;
   try {
@@ -112,34 +130,114 @@ function lineupOf(e) {
     return [];
   }
 }
-// The act to lead with: the headliner when the title was parsed into a bill
-// ("Tractor Presents: Bob Sumner w/ …" → "Bob Sumner"), else the title.
-const headline = (e) => (kindOf(e) === 'film' ? e.title : lineupOf(e)[0] || e.title);
+// The name to lead with: the server's headline (the act, or the title for a
+// trivia night or a play), else the headliner when the title was parsed.
+const headline = (e) => e._headline || (isFilm(e) ? e.title : lineupOf(e)[0] || e.title);
 function runtime(min) {
   return min ? `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m` : '';
 }
-function subline(e) {
-  if (kindOf(e) === 'film') return [e.year, e.rating, runtime(e.runtime)].filter(Boolean).join(' · ');
-  const rest = lineupOf(e).slice(1);
-  if (!rest.length) return '';
-  return `with ${rest.slice(0, 2).join(' & ')}${rest.length > 2 ? ` +${rest.length - 2} more` : ''}`;
+
+// What it is, as a tag: Music, Stand-up, Film, Drag, Trivia… The server's
+// kind when there is one, else the source category.
+const FALLBACK_KIND = {
+  film: { label: 'Film', family: 'film' },
+  comedy: { label: 'Stand-up', family: 'comedy' },
+  music: { label: 'Music', family: 'music' },
+};
+const kindInfo = (e) => e._kind || FALLBACK_KIND[kindOf(e)] || { label: 'Event', family: 'other' };
+function kindTag(e, { plain = false } = {}) {
+  const k = kindInfo(e);
+  if (plain) return `<span class="tk-kind">${esc(k.label)}</span>`;
+  return `<span class="kind k-${esc(k.family)}${e._regular ? ' reg' : ''}">${esc(k.label)}</span>`;
 }
 
-const GLYPH = { favorite: '♥', learned: '★', similar: '≈', film: '◆', genre: '♪', 'learned-tags': '↺', nearby: '⌂', penalty: '↓' };
-const WHY_ORDER = ['favorite', 'learned', 'similar', 'film', 'genre', 'learned-tags', 'nearby'];
-// The one reason worth showing in a list: a favorite beats a sound-alike
-// beats a genre match beats "close to home".
-function whyLine(e) {
-  const reasons = e._reasons || [];
-  for (const kind of WHY_ORDER) {
-    const r = reasons.find((x) => x.kind === kind);
-    if (r) return `${GLYPH[kind]} ${r.text}`;
+// A film's one line: "Drama · 1984 · 2h 25m · MC 88".
+function filmLine(f) {
+  const crit = f.mc_score != null ? `MC ${f.mc_score}` : f.rt_score != null ? `RT ${f.rt_score}%` : '';
+  return [f.genre, f.year, runtime(f.runtime), crit].filter(Boolean).join(' · ');
+}
+
+const tagList = (tags) => (tags || []).map((t) => `<span class="${t.hit ? 'hit' : ''}">${esc(t.tag)}</span>`).join(' · ');
+const LINK_GLYPH = { curated: '✎', favorite: '♥', learned: '★', similar: '≈' };
+
+// The "what is it" line: genres (yours highlighted), a descriptor for an act
+// we know little about, a comedian's run, a film's genre and reviews, a
+// regular night's cadence.
+function feelLine(e) {
+  const f = e._feel || {};
+  if (isFilm(e)) return esc(f.line || filmLine(e));
+  const k = kindInfo(e);
+  const tags = tagList(f.tags);
+  const run = e._run?.text || '';
+  if (k.family === 'comedy') {
+    const n = lineupOf(e).length;
+    const what = f.descriptor
+      || (k.key === 'improv' ? 'improv' : k.key === 'podcast' ? 'live podcast' : n >= 4 ? `showcase · ${n} comics` : 'stand-up');
+    return esc([what, run].filter(Boolean).join(' · '));
   }
+  if (k.family === 'music') {
+    let out = tags;
+    if (out && f.descriptor && (f.tags || []).length < 2) out = `${esc(f.descriptor)} · ${out}`;
+    if (!out) out = f.habit ? `<i>${esc(f.habit)}</i>` : esc(f.descriptor || f.bill || '');
+    return [esc(e._regular?.cadence || ''), out, esc(run)].filter(Boolean).join(' · ');
+  }
+  return [esc(e._regular?.cadence || run), tags].filter(Boolean).join(' · ');
+}
+
+// The "is it for us" line: a favorite on the bill, who they sound like, who
+// they're for, or who else is playing.
+function linkLine(e) {
+  const l = e._feel?.link;
+  if (!l && isFilm(e)) {
+    const flag = (e._flags || [])[0]?.label || (e.special ? 'Special screening' : '');
+    return esc([flag, e.director ? `dir. ${e.director}` : ''].filter(Boolean).join(' · '));
+  }
+  if (!l) return '';
+  const g = LINK_GLYPH[l.kind];
+  return `${g ? `<span class="g" aria-hidden="true">${g}</span> ` : ''}${esc(l.text)}`;
+}
+
+// "For fans of A, B & C", when the link line went to something else.
+function fansLine(e, limit = 3) {
+  const f = e._feel;
+  if (!f?.fans?.length || f.link?.kind === 'fans') return '';
+  const names = f.fans.slice(0, limit).map((a) => `${a.favorite ? '♥ ' : ''}${a.name}`);
+  return `For fans of ${esc(names.length > 1 ? `${names.slice(0, -1).join(', ')} & ${names.at(-1)}` : names[0])}`;
+}
+
+function planText(e) {
+  if (e.going) return '<b class="plan">✓ Going</b>';
+  if (e.interested) return '<b class="plan">✓ Maybe</b>';
   return '';
 }
 
+function metaLine(e) {
+  if (isFilm(e)) {
+    const times = (e.times || []).map(fmtTime).join(', ');
+    return esc([e.venue, times].filter(Boolean).join(' · '));
+  }
+  const times = e._times?.length > 1 ? e._times.map(fmtTime).join(' & ') : '';
+  // "Free" in the price already says it.
+  const flag = (e._flags || []).find((f) => !(f.key === 'free' && /free/i.test(e.price_range || '')));
+  return [
+    esc([e.venue, e.city, times, e.price_range].filter(Boolean).join(' · ')),
+    flag ? `<b class="flag">${esc(flag.label)}</b>` : '',
+    planText(e),
+  ].filter(Boolean).join(' · ');
+}
+
+// A song to preview: a round play button (rows) or "▶ Listen" (tickets).
+function previewButton(e, { label = false } = {}) {
+  const p = e._feel?.preview;
+  if (!p || !isHttp(p.url)) return '';
+  const name = `Play a preview: ${p.title} by ${p.artist}`;
+  return label
+    ? `<button class="pb listen" data-act="play" data-key="${enc(p.url)}" aria-label="${esc(name)}" aria-pressed="false"><span class="pl-off">▶ Listen</span><span class="pl-on">❚❚ Pause</span></button>`
+    : `<button class="pv" data-act="play" data-key="${enc(p.url)}" aria-label="${esc(name)}" aria-pressed="false"><span class="play" aria-hidden="true"></span></button>`;
+}
+
 function register(e) {
-  if (kindOf(e) === 'film') {
+  if (isFilm(e)) {
     films.set(e.id, e);
     return;
   }
@@ -156,102 +254,142 @@ function planButtons(e) {
     `<button class="pb ${maybe ? 'on-maybe' : ''}" data-plan="maybe" data-id="${e.id}" aria-pressed="${maybe}">${maybe ? '✓ Maybe' : 'Maybe'}</button>`
   );
 }
-function pills(e) {
-  const kind = kindOf(e);
-  const plan = e.going ? '<span class="pill going">Going</span>' : e.interested ? '<span class="pill maybe">Maybe</span>' : '';
-  const label = kind === 'film' ? 'Film' : kind === 'comedy' ? 'Comedy' : '';
-  return plan + (label ? `<span class="pill kind">${label}</span>` : '');
-}
 
-// One line in a list: time, act, where, and optionally why it's there.
-function row(e, { why = false, day = false, reason = '' } = {}) {
+// One listing in a list. The whole row opens it; a play button beside it
+// previews the headliner's best-known song.
+//   time + kind │ title
+//               │ what it is (genres, a descriptor, a film's reviews)
+//               │ is it for us (a favorite, sounds like, for fans of)
+//               │ where · price · flag · your plan
+function row(e, { day = false, reason = '' } = {}) {
   register(e);
-  const film = kindOf(e) === 'film';
+  const film = isFilm(e);
   const time = fmtTime(e.time);
-  const when = day ? `${monthDay(e.date)}<br>${time || dow(e.date)}` : time || '—';
-  const where = film && e.times?.length > 1
-    ? `${e.venue} · ${e.times.map(fmtTime).join(', ')}`
-    : [e.venue, e.city].filter(Boolean).join(' · ');
-  const w = why ? whyLine(e) : '';
-  const score = e._score ?? 0;
-  return `<button class="row ${!film && score < GOOD ? 'dim' : ''}" data-open="${film ? 'film' : 'event'}" data-key="${esc(e.id)}">
-    <span class="r-time">${when}</span>
-    <span class="r-body">
-      <span class="r-title">${!film && score >= PICK ? '<span class="r-star">★</span> ' : ''}${esc(headline(e))}</span>
-      <span class="r-meta">${esc(where)}${e.price_range ? ` · ${esc(e.price_range)}` : ''}</span>
-      ${w ? `<span class="r-why">${esc(w)}</span>` : ''}
-      ${reason ? `<span class="r-reason">“${esc(reason)}”</span>` : ''}
-    </span>
-    <span class="r-pills">${pills(e)}</span>
-  </button>`;
+  const when = day ? `<span class="r-date">${esc(monthDay(e.date))}</span>${time || esc(dow(e.date))}` : time || '—';
+  const pick = e._pick ?? e._score ?? 0;
+  const feel = feelLine(e);
+  const link = reason ? `<span class="g" aria-hidden="true">✎</span> “${esc(reason)}”` : linkLine(e);
+  const fans = fansLine(e);
+  const pv = previewButton(e);
+  return `<article class="row ${!film && pick < GOOD ? 'dim' : ''} ${pv ? 'has-pv' : ''}">
+    <div class="r-stub"><span class="r-time">${when}</span>${kindTag(e)}</div>
+    <div class="r-body">
+      <button class="r-main" data-open="${film ? 'film' : 'event'}" data-key="${esc(e.id)}"><span class="r-title">${!film && pick >= PICK ? '<span class="r-star" aria-label="Top pick">★</span> ' : ''}${esc(headline(e))}</span></button>
+      ${feel ? `<span class="r-feel">${feel}</span>` : ''}
+      ${link ? `<span class="r-link">${link}</span>` : ''}
+      ${fans ? `<span class="r-fans">${fans}</span>` : ''}
+      <span class="r-meta">${metaLine(e)}</span>
+    </div>
+    ${pv}
+  </article>`;
 }
 
 // A top pick or a Going show, as a ticket with a date stub.
-function ticket(e) {
+function ticket(e, { role = '' } = {}) {
   register(e);
+  const film = isFilm(e);
   const going = Boolean(e.going);
-  const sub = subline(e);
-  const why = whyLine(e);
   const time = fmtTime(e.time);
+  const f = e._feel || {};
+  const when = role ? `${role}${time ? ` · ${time}` : ''}` : `${dayName(e.date)}${time ? ` · ${time}` : ''}`;
+  const tags = tagList(f.tags);
+  const lines = film
+    ? [
+      `<span class="tk-tags">${esc(f.line || filmLine(e))}</span>`,
+      f.synopsis || e.synopsis ? `<span class="tk-sub tk-syn">${esc(f.synopsis || e.synopsis)}</span>` : '',
+    ]
+    : [
+      f.descriptor ? `<span class="tk-sub">${esc(f.descriptor)}</span>` : '',
+      tags ? `<span class="tk-tags">${tags}</span>` : f.habit ? `<span class="tk-tags"><i>${esc(f.habit)}</i></span>` : '',
+    ];
+  const link = linkLine(e);
+  const fans = fansLine(e);
+  const times = e._times?.length > 1 ? ` · ${e._times.map(fmtTime).join(' & ')}` : '';
   return `<article class="tk ${going ? 'is-going' : ''}">
     <div class="tk-stub" aria-hidden="true">
       <span class="tk-dow">${dow(e.date)}</span><span class="tk-num">${dayNum(e.date)}</span>
-      <span class="tk-time">${time || '—'}</span><span class="tk-serial">No. ${String(e.id).padStart(4, '0')}</span>
+      <span class="tk-time">${time || '—'}</span>${kindTag(e, { plain: true })}
     </div>
-    <button class="tk-main" data-open="event" data-key="${e.id}">
-      <span class="tk-when">${esc(dayName(e.date))}${time ? ` · ${time}` : ''}</span>
+    <button class="tk-main" data-open="${film ? 'film' : 'event'}" data-key="${esc(e.id)}">
+      <span class="tk-when">${esc(when)}</span>
       <span class="tk-title">${esc(headline(e))}</span>
-      ${sub ? `<span class="tk-sub">${esc(sub)}</span>` : ''}
-      <span class="tk-where">${esc([e.venue, e.city].filter(Boolean).join(' · '))}</span>
-      ${why ? `<span class="tk-why">${esc(why)}</span>` : ''}
+      ${lines.join('')}
+      ${link ? `<span class="tk-why">${link}</span>` : ''}
+      ${fans ? `<span class="tk-fans">${fans}</span>` : ''}
+      <span class="tk-where">${esc([e.venue, e.city].filter(Boolean).join(' · ') + times)}</span>
     </button>
-    <div class="tk-acts">${planButtons(e)}<span class="tk-price">${esc(e.price_range || '')}</span></div>
+    <div class="tk-acts">${previewButton(e, { label: true })}${film ? '' : planButtons(e)}<span class="tk-price">${esc(film ? (e.times || []).map(fmtTime).join(', ') : e.price_range || '')}</span></div>
     ${going ? '<span class="tk-stamp" aria-hidden="true">Admit two</span>' : ''}
   </article>`;
 }
 
 function furtherCard(e) {
   register(e);
+  const tags = (e._feel?.tags || []).map((t) => t.tag).join(' · ');
   return `<button class="fc" data-open="event" data-key="${e.id}">
-    <span class="fc-date">${esc(shortDate(e.date))}</span>
+    <span class="fc-date">${esc(kindInfo(e).label)} · ${esc(shortDate(e.date))}</span>
     <span class="fc-name">${esc(headline(e))}</span>
+    ${tags ? `<span class="fc-tags">${esc(tags)}</span>` : ''}
     <span class="fc-ven">${esc([e.venue, e.city].filter(Boolean).join(' · '))}</span>
   </button>`;
+}
+
+// "◆ At the movies: Paris, Texas (one night) · Anora (MC 91) +2 ›" — a day's
+// films in one line, opening the day page.
+function filmsLink(date, count, top) {
+  if (!count) return '';
+  const names = top.map((f) => `${f.title}${f.note ? ` (${f.note})` : ''}`);
+  const rest = count - top.length;
+  const text = names.length ? `${names.join(' · ')}${rest > 0 ? ` +${rest}` : ''}` : `${count} ${count === 1 ? 'film' : 'films'}`;
+  return `<a class="filmline" href="#day/${date}"><span class="g" aria-hidden="true">◆</span> <span class="fl-k">At the movies:</span> ${esc(text)} <span aria-hidden="true">›</span></a>`;
+}
+
+// The seven-day strip. On the Week it opens a day; on a day page it moves to
+// another day without stacking up history (see goDay).
+function strip(days, { current = null, today }) {
+  return `<div class="strip">${days.map((d) => {
+    const isToday = d.date === today;
+    const on = d.date === current;
+    const label = `${esc(dayName(d.date))}, ${d.total} on${d.hasPick ? ', with a top pick' : ''}`;
+    const inner = `<span class="sd-w">${isToday ? 'Today' : dow(d.date)}</span><span class="sd-n">${dayNum(d.date)}</span>
+      <span class="sd-c">${d.total}</span>${d.hasPick ? '<span class="lit"></span>' : ''}`;
+    return current
+      ? `<button class="sd ${on ? 'on' : ''} ${isToday ? 'today' : ''}" data-day="${d.date}" aria-label="${label}" ${on ? 'aria-current="date"' : ''}>${inner}</button>`
+      : `<a class="sd ${isToday ? 'today on' : ''}" href="#day/${d.date}" aria-label="${label}">${inner}</a>`;
+  }).join('')}</div>`;
 }
 
 // ── Week ────────────────────────────────────────────────────────────────────
 function renderWeek() {
   const b = state.brief;
   if (!b) return '<p class="loading">Loading your week…</p>';
-  const strip = b.days
-    .map((d) => {
-      const today = d.date === b.today;
-      return `<button class="sd ${today ? 'today' : ''}" data-open="day" data-key="${d.date}"
-          aria-label="${esc(dayName(d.date))}, ${d.total} on${d.hasPick ? ', with a top pick' : ''}">
-        <span class="sd-w">${today ? 'Today' : dow(d.date)}</span><span class="sd-n">${dayNum(d.date)}</span>
-        <span class="sd-c">${d.total}</span>${d.hasPick ? '<span class="lit"></span>' : ''}</button>`;
-    })
-    .join('');
   const picks = b.picks.length
-    ? `<div class="tickets">${(state.morePicks ? b.picks : b.picks.slice(0, 3)).map(ticket).join('')}</div>
+    ? `<div class="tickets">${(state.morePicks ? b.picks : b.picks.slice(0, 3)).map((e) => ticket(e)).join('')}</div>
        ${b.picks.length > 3 ? `<button class="more" data-act="morepicks">${state.morePicks ? 'Show fewer' : `${b.picks.length - 3} more top picks`}</button>` : ''}`
     : '<p class="note">No top picks this week. Add favorite artists and genres in <a href="/settings.html">Settings</a>, or mark shows Maybe so EventLight learns what you like.</p>';
   const days = b.days
-    .map((d) => `<section>
-      <button class="dh ${d.date === b.today ? 'today' : ''}" data-open="day" data-key="${d.date}">
+    .map((d) => {
+      const more = d.more - (d.films?.top?.length || 0);
+      const quiet = !d.total ? 'Nothing listed yet.' : d.picksLabel === 'regulars' ? 'Just the regulars.' : 'Quiet night. Nothing close to your taste.';
+      return `<section>
+      <a class="dh ${d.date === b.today ? 'today' : ''}" href="#day/${d.date}" title="${esc(d.dek || '')}">
         <span class="dl">${esc(dayName(d.date))}</span><span class="dd">${esc(shortDate(d.date))}</span><span class="dc">${d.total} on ›</span>
-      </button>
-      ${d.best.length ? d.best.map((e) => row(e)).join('') : `<p class="quiet">${d.total ? 'Quiet night. Nothing that clears your bar.' : 'Nothing listed yet.'}</p>`}
-      ${d.more > 0 ? `<button class="more" data-open="day" data-key="${d.date}">+${d.more} more</button>` : ''}
-    </section>`)
+      </a>
+      ${d.picks.length ? d.picks.map((e) => row(e)).join('') : `<p class="quiet">${quiet}</p>`}
+      ${filmsLink(d.date, d.films?.count || 0, d.films?.top || [])}
+      ${more > 0 ? `<a class="more" href="#day/${d.date}">+${more} more${d.regulars ? ` · ${d.regulars} weekly` : ''} ›</a>` : ''}
+    </section>`;
+    })
     .join('');
   const further = b.further.length
     ? `<h2 class="h">Further out</h2><div class="further">${b.further.map(furtherCard).join('')}</div>`
     : '';
+  const note = [b.note?.text, b.curated?.criteria ? `Curated for “${b.curated.criteria}”` : ''].filter(Boolean);
   // One column on phones; on a wide screen, picks and further out sit beside the days.
   return `<h1 class="title">This week</h1>
     <div class="range">${esc(shortDate(b.from))} – ${esc(shortDate(b.to))}</div>
-    <div class="strip">${strip}</div>
+    ${note.length ? `<p class="wnote">${note.map(esc).join(' · ')}</p>` : ''}
+    ${strip(b.days, { today: b.today })}
     <div class="week">
       <section class="w-picks"><h2 class="h">Top picks</h2>${picks}</section>
       <section class="w-days"><h2 class="h">Day by day</h2>${days}</section>
@@ -259,7 +397,97 @@ function renderWeek() {
     </div>`;
 }
 
+// ── A day ───────────────────────────────────────────────────────────────────
+function countsLine(c) {
+  return [
+    [c.music, 'music'], [c.comedy, 'comedy'], [c.film, c.film === 1 ? 'film' : 'films'],
+    [c.around, 'around town'], [c.regulars, 'weekly'],
+  ].filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`).join(' · ');
+}
+
+function fold(key, open, title, body) {
+  return `<section class="fold ${open ? 'open' : ''}">
+    <button class="fold-h" data-act="fold" data-key="${key}" aria-expanded="${open}">${title}<span class="chev" aria-hidden="true">${open ? '−' : '›'}</span></button>
+    ${open ? `<div class="fold-b">${body}</div>` : ''}
+  </section>`;
+}
+
+// One line for a weekly night: "7:00p  TRIVIA  Trivia Night · Airport Tavern · Every Thu".
+function regularLine(e) {
+  register(e);
+  return `<button class="rl" data-open="event" data-key="${e.id}">
+    <span class="r-time">${fmtTime(e.time) || '—'}</span>${kindTag(e)}
+    <span class="rl-t">${esc(headline(e))}</span><span class="rl-m">${esc([e.venue, e._regular?.cadence].filter(Boolean).join(' · '))}</span>
+  </button>`;
+}
+
+function renderDay() {
+  const d = state.dayData;
+  if (!d || d.date !== state.day) return '<p class="loading">Loading…</p>';
+  const back = `<button class="backlink" data-act="day-back">‹ ${state.dayFrom === 'explore' ? 'Explore' : 'Week'}</button>`;
+  const name = dayName(d.date);
+  const pickHead = d.picks.length
+    ? `Top picks ${forDay(d.date)}`
+    : d.picksLabel === 'regulars' ? 'Just the regulars' : 'Nothing stands out';
+  const pickNote = d.picks.length
+    ? ''
+    : d.counts.total
+      ? `<p class="note">${d.picksLabel === 'regulars' ? 'Only the weekly nights are on. They’re below.' : 'Nothing close to your taste. Everything on is below, best first.'}</p>`
+      : `<p class="note">Nothing listed for ${esc(name === 'Tonight' ? 'tonight' : name)} yet. Venues usually post a few weeks out.</p>`;
+  const picks = d.picks.length
+    ? `<div class="tickets">${d.picks.map((e) => ticket(e, { role: e._role?.label || '' })).join('')}</div>`
+    : '';
+  const plans = d.plans.length ? `<section class="d-plans"><h2 class="h">Your other plans</h2>${d.plans.map((e) => row(e)).join('')}</section>` : '';
+  const group = (g) => {
+    const open = state.open.has(`g-${g.key}`);
+    const ids = new Set(g.showIds);
+    const list = open ? g.items : g.items.filter((e) => ids.has(e.id));
+    const more = g.total - list.length;
+    return `<section class="grp grp-${g.key}" id="g-${g.key}"><h2 class="h">${esc(g.label)} · ${g.total}</h2>
+      ${list.map((e) => row(e)).join('')}
+      ${more > 0 ? `<button class="loadmore" data-act="fold" data-key="g-${g.key}">+${more} more ${esc(g.label.toLowerCase())}</button>` : ''}
+      ${open && g.total > g.showIds.length ? `<button class="more" data-act="fold" data-key="g-${g.key}">Show fewer</button>` : ''}
+    </section>`;
+  };
+  const left = d.groups.filter((g) => g.key === 'film').map(group).join('');
+  const right = d.groups.filter((g) => g.key !== 'film').map(group).join('');
+  const regKinds = [...new Set(d.regulars.map((e) => kindInfo(e).label.toLowerCase()))].join(', ');
+  const regulars = d.regulars.length
+    ? fold('regulars', state.open.has('regulars') || (!d.picks.length && d.picksLabel === 'regulars'),
+      `<span>Every week · ${d.regulars.length}</span><span class="fold-k">${esc(regKinds)}</span>`,
+      d.regulars.map(regularLine).join(''))
+    : '';
+  const started = d.started.length
+    ? fold('started', state.open.has('started'), `<span>Already started · ${d.started.length}</span>`, d.started.map((e) => row(e)).join(''))
+    : '';
+  const nav = (dir, n) => {
+    if (!n) return '<span></span>';
+    const label = `${dir < 0 ? '‹ ' : ''}${esc(n.date === state.today ? 'Today' : weekday(n.date))}${dir > 0 ? ' ›' : ''}`;
+    return `<button class="dnav ${dir > 0 ? 'next' : 'prev'}" data-day="${n.date}">
+      <span class="dn-d">${label}</span><span class="dn-p">${n.picks ? `${n.picks} ${n.picks === 1 ? 'pick' : 'picks'}` : esc(shortDate(n.date))}</span></button>`;
+  };
+  return `<div class="dayp">
+    <header class="d-head">
+      ${back}
+      <p class="d-eye">${esc(shortDate(d.date))}</p>
+      <h1 class="title" tabindex="-1" id="day-title">${esc(name)}</h1>
+      ${d.dek ? `<p class="dek">${esc(d.dek)}</p>` : ''}
+      ${d.counts.total ? `<p class="range">${esc(countsLine(d.counts))}</p>` : ''}
+      ${strip(d.strip, { current: d.date, today: d.today })}
+    </header>
+    <div class="d-left">
+      <section class="d-picks"><h2 class="h">${esc(pickHead)}</h2>${picks}${pickNote}</section>
+      ${plans}
+      ${left}
+    </div>
+    <div class="d-right">${right}${regulars}${started}</div>
+    <nav class="d-foot" aria-label="Other days">${nav(-1, d.prev)}${nav(1, d.next)}</nav>
+  </div>`;
+}
+
 // ── Explore ─────────────────────────────────────────────────────────────────
+const EXPLORE_TYPES = [['all', 'Everything'], ['music', 'Music'], ['comedy', 'Comedy'], ['film', 'Film'], ['other', 'Around town']];
+
 function renderExplore() {
   const x = state.explore;
   const chip = (key, label) => `<button class="chip" data-act="x-type" data-key="${key}" aria-pressed="${x.type === key}">${label}</button>`;
@@ -271,7 +499,7 @@ function renderExplore() {
     <div class="explore">
       <div class="x-side">
         <input class="search" id="x-search" type="search" placeholder="Search shows, artists, venues" aria-label="Search" value="${esc(x.q)}" ${filmMode ? 'hidden' : ''} />
-        <div class="controls">${chip('all', 'Everything')}${chip('music', 'Music')}${chip('comedy', 'Comedy')}${chip('film', 'Film')}</div>
+        <div class="controls">${EXPLORE_TYPES.map(([k, l]) => chip(k, l)).join('')}</div>
         ${filmMode ? '' : `<div class="controls">
           <select class="select" id="x-city" aria-label="City"><option value="all">Anywhere</option>${cities}</select>
           <div class="seg" role="group" aria-label="View">${seg('x-mode', 'list', 'List', x.mode === 'list')}${seg('x-mode', 'calendar', 'Calendar', x.mode === 'calendar')}</div>
@@ -285,28 +513,44 @@ function renderExplore() {
     </div>`;
 }
 
+// Films on a date in Explore's list: one-off screenings and films worth
+// planning around get their own rows; the rest fold into one line.
+function exploreFilms(date) {
+  const list = state.explore.films[date] || [];
+  const rows = list.filter((f) => f.special || f._film?.eligible);
+  const rest = list.filter((f) => !rows.includes(f));
+  return { rows, line: filmsLink(date, rest.length, []) };
+}
+
 function renderResults() {
   const x = state.explore;
   if (x.type === 'film') return renderFilms();
   if (x.mode === 'calendar') return renderCalendar();
   if (x.loading && !x.events.length) return '<p class="loading">Loading…</p>';
-  if (!x.events.length) {
+  const filmDates = Object.keys(x.films || {});
+  if (!x.events.length && !filmDates.length) {
     return '<div class="empty"><strong>Nothing matches</strong>Try another search or city. <button class="linkbtn" data-act="x-clear">Clear filters</button></div>';
   }
   const count = `<div class="count">${x.total} upcoming ${x.total === 1 ? 'show' : 'shows'}</div>`;
   let body;
   if (x.sort === 'relevance') {
-    body = x.events.map((e) => row(e, { why: true, day: true })).join('');
+    body = x.events.map((e) => row(e, { day: true })).join('');
   } else {
     const byDate = new Map();
     for (const e of x.events) {
       if (!byDate.has(e.date)) byDate.set(e.date, []);
       byDate.get(e.date).push(e);
     }
-    body = [...byDate]
-      .map(([date, evs]) => `<div class="sh"><span class="dl">${esc(dayName(date))}</span><span class="dd">${esc(shortDate(date))}</span>
-        <button class="dc linkbtn" data-open="day" data-key="${date}">Whole night ›</button></div>
-        ${evs.map((e) => row(e, { why: true })).join('')}`)
+    // A date with films and no shows still gets its header.
+    for (const date of filmDates) if (!byDate.has(date)) byDate.set(date, []);
+    body = [...byDate.keys()].sort()
+      .map((date) => {
+        const { rows, line } = exploreFilms(date);
+        const items = [...byDate.get(date), ...rows].sort((a, b) => (a.time || '99').localeCompare(b.time || '99'));
+        return `<div class="sh"><span class="dl">${esc(dayName(date))}</span><span class="dd">${esc(shortDate(date))}</span>
+        <a class="dc" href="#day/${date}">Whole day ›</a></div>
+        ${items.map((e) => row(e)).join('')}${line}`;
+      })
       .join('');
   }
   const more = x.page < x.pages ? `<button class="loadmore" data-act="x-more">${x.loading ? 'Loading…' : 'Show more'}</button>` : '';
@@ -321,6 +565,7 @@ function movieEntry(m, special) {
     showtimes: m.showtimes, venue: m.theater, city: m.city, ticket_url: m.url, special,
     rating: m.rating, runtime: m.runtime, director: m.director, starring: m.starring, year: m.year,
     genre: m.genre, synopsis: m.synopsis, poster_url: m.poster_url, trailer_url: m.trailer_url, mc_score: m.mc_score, rt_score: m.rt_score,
+    _flags: special && m.showtimes.length === 1 ? [{ key: 'one-night', label: 'One night only' }] : [],
     _reasons: special ? [{ kind: 'film', text: m.showtimes.length === 1 ? 'One night only' : 'Special screening' }] : [],
   };
 }
@@ -329,17 +574,17 @@ function renderFilms() {
   const m = state.movies;
   if (!m) return '<p class="loading">Loading…</p>';
   const section = (label, list, special) =>
-    list.length ? `<h2 class="h">${label}</h2>${list.map((f) => row(movieEntry(f, special), { day: true, why: true })).join('')}` : '';
+    list.length ? `<h2 class="h">${label}</h2>${list.map((f) => row(movieEntry(f, special), { day: true })).join('')}` : '';
   const out = section('Special screenings', m.special, true) + section('Now playing', m.nowPlaying, false) + section('Coming soon', m.comingSoon, false);
   // Kids' films and vapid action films are filtered out; each says why, and
   // films you hid can come back.
   const left = [...m.filtered, ...m.hidden];
   const leftOut = left.length
     ? `<button class="more" data-act="x-leftout">${state.showLeftOut ? 'Hide what’s left out' : `Show what’s left out (${left.length})`}</button>
-       ${state.showLeftOut ? left.map((f) => `<div class="row dim">
-          <span class="r-time">${esc(monthDay(localISO(new Date(f.showtimes[0]))))}</span>
-          <span class="r-body"><span class="r-title">${esc(f.title)}</span><span class="r-meta">${esc(f.hidden ? 'Hidden by you' : f._filter?.reason || 'Filtered')}</span></span>
-          <span class="r-pills">${f.hidden ? `<button class="pb" data-act="unhide-film" data-id="${f.id}">Show again</button>` : ''}</span>
+       ${state.showLeftOut ? left.map((f) => `<div class="row lo dim">
+          <div class="r-stub"><span class="r-time">${esc(monthDay(localISO(new Date(f.showtimes[0]))))}</span></div>
+          <div class="r-body"><span class="r-title">${esc(f.title)}</span><span class="r-meta">${esc(f.hidden ? 'Hidden by you' : f._filter?.reason || 'Filtered')}</span></div>
+          ${f.hidden ? `<button class="pb" data-act="unhide-film" data-id="${f.id}">Show again</button>` : ''}
         </div>`).join('') : ''}`
     : '';
   return (out || '<div class="empty"><strong>No films listed</strong>The cinema listings arrive on the next refresh.</div>') + leftOut;
@@ -357,8 +602,11 @@ function renderCalendar() {
     const date = `${x.month}-${String(d).padStart(2, '0')}`;
     const n = x.counts[date] || 0;
     const past = date < state.today;
-    cells += `<button class="cc ${date === state.today ? 'today' : ''}" data-open="day" data-key="${date}" ${past || !n ? 'disabled' : ''}
-      aria-label="${esc(shortDate(date))}, ${n} on">${d}${n ? `<span class="n">${n}</span>` : ''}</button>`;
+    const label = `${esc(shortDate(date))}, ${n} on`;
+    const inner = `${d}${n ? `<span class="n">${n}</span>` : ''}`;
+    cells += past || !n
+      ? `<span class="cc off ${date === state.today ? 'today' : ''}" aria-label="${label}">${inner}</span>`
+      : `<a class="cc ${date === state.today ? 'today' : ''}" href="#day/${date}" aria-label="${label}">${inner}</a>`;
   }
   const title = first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   return `<div class="cal-head"><button data-act="x-month" data-key="-1" aria-label="Previous month">‹</button>
@@ -372,10 +620,10 @@ function renderSaved() {
   if (!s) return '<p class="loading">Loading…</p>';
   const feed = `${location.origin}/api/calendar/going.ics`;
   const going = s.going.length
-    ? `<div class="tickets">${s.going.map(ticket).join('')}</div>`
+    ? `<div class="tickets">${s.going.map((e) => ticket(e)).join('')}</div>`
     : '<p class="note">Nothing yet. Mark a show Going and it lands here, stamped.</p>';
   const maybe = s.maybe.length
-    ? s.maybe.map((e) => row(e, { why: true, day: true })).join('')
+    ? s.maybe.map((e) => row(e, { day: true })).join('')
     : '<p class="note">Shows you mark Maybe collect here while you decide.</p>';
   const c = state.curated;
   const curated = c && c.events.length
@@ -401,6 +649,8 @@ function factsGrid(list) {
   return `<div class="facts">${list.map(([k, v]) => `<div class="fact"><span class="fk">${k}</span><span class="fv">${esc(v)}</span></div>`).join('')}</div>`;
 }
 
+const GLYPH = { favorite: '♥', learned: '★', similar: '≈', film: '◆', genre: '♪', 'learned-tags': '↺', nearby: '⌂', penalty: '↓' };
+
 function sheetEvent(d) {
   const e = d.event;
   register(e);
@@ -411,19 +661,29 @@ function sheetEvent(d) {
   const matched = (e._matched || []).map((g) => g.toLowerCase());
   const tags = (e._tags || []).slice(0, 8);
   const isHit = (t) => matched.some((g) => ` ${t.replace(/-/g, ' ')} `.includes(` ${g.replace(/-/g, ' ')} `));
+  const comedy = kindInfo(e).family === 'comedy';
   const lineup = d.lineup.length
     ? `<div class="s-h">Lineup</div><div class="acts">${d.lineup.map((a, i) => {
-        const note = a.favorite ? '♥ Favorite' : a.starred ? '★ Starred before' : a.similar ? `≈ ${a.similar.seed}` : a.tags.slice(0, 2).join(', ');
-        return `<button class="actchip" data-open="artist" data-key="${enc(a.name)}">
-          <span><span class="role">${i === 0 ? 'Headliner' : 'Support'}${note ? ` · ${esc(note)}` : ''}</span>${esc(a.name)}</span><span class="chev">›</span></button>`;
+        const note = a.favorite ? '♥ Favorite' : a.starred ? '★ Starred before' : a.similar ? `≈ ${a.similar.seed}` : '';
+        const what = [a.descriptor, (a.tags || []).slice(0, 3).join(' · ')].filter(Boolean).join(' · ');
+        const fans = a.fans?.length ? `For fans of ${a.fans.map((f) => `${f.favorite ? '♥ ' : ''}${f.name}`).join(', ')}` : '';
+        const pv = a.preview && isHttp(a.preview.url)
+          ? `<button class="pv" data-act="play" data-key="${enc(a.preview.url)}" aria-label="${esc(`Play a preview: ${a.preview.title} by ${a.preview.artist}`)}" aria-pressed="false"><span class="play" aria-hidden="true"></span></button>`
+          : '';
+        return `<div class="actrow ${pv ? 'has-pv' : ''}"><button class="actchip" data-open="artist" data-key="${enc(a.name)}" ${comedy ? 'data-hint="comedy"' : ''}>
+          <span><span class="role">${i === 0 ? 'Headliner' : 'Support'}${note ? ` · ${esc(note)}` : ''}</span>${esc(a.name)}
+          ${what ? `<span class="a-what">${esc(what)}</span>` : ''}${fans ? `<span class="a-fans">${esc(fans)}</span>` : ''}</span><span class="chev">›</span></button>${pv}</div>`;
       }).join('')}</div>`
     : '';
+  const flags = [...(e._flags || []).map((f) => f.label), e._regular?.cadence, e._run?.text].filter(Boolean);
   return {
-    body: `<p class="s-eye">${esc(dayName(e.date))} · ${esc(shortDate(e.date))}${e.time ? ` · ${fmtTime(e.time)}` : ''}</p>
+    body: `<p class="s-eye">${esc(kindInfo(e).label)} · ${esc(dayName(e.date))} · ${esc(shortDate(e.date))}${e.time ? ` · ${fmtTime(e.time)}` : ''}</p>
       <div class="s-title">${esc(headline(e))}</div>
       ${headline(e) !== e.title ? `<p class="s-sub">${esc(e.title)}</p>` : ''}
       <p class="s-sub"><button class="s-link" data-open="venue" data-key="${enc(e.venue)}">${esc(e.venue)}</button>${e.city ? ` · ${esc(e.city)}` : ''}</p>
-      ${factsGrid([['Doors', fmtTime(e.doors_time) || '—'], ['Show', fmtTime(e.time) || 'TBA'], ['Price', e.price_range || '—'], ['From home', fromHome]])}
+      ${flags.length ? `<p class="s-flags">${flags.map(esc).join(' · ')}</p>` : ''}
+      ${factsGrid([['Doors', fmtTime(e.doors_time) || '—'], ['Show', e._times?.length > 1 ? e._times.map(fmtTime).join(' & ') : fmtTime(e.time) || 'TBA'], ['Price', e.price_range || '—'], ['From home', fromHome]])}
+      ${e._curated ? `<p class="connect">✎ ${esc(e._curated)}</p>` : ''}
       <div class="s-h">Why it’s here</div>
       ${reasons.length
         ? `<ul class="reasons">${reasons.map((r) => `<li><span class="g">${GLYPH[r.kind] || '·'}</span>${esc(r.text)}</li>`).join('')}</ul>`
@@ -431,8 +691,8 @@ function sheetEvent(d) {
       ${tags.length ? `<div class="tags">${tags.map((t) => `<span class="tag ${isHit(t) ? 'hit' : ''}">${esc(t)}</span>`).join('')}</div>` : ''}
       ${lineup}
       <div class="s-h">Same night</div>
-      ${d.sameNight.length ? d.sameNight.map((x) => row(x, { why: true })).join('') : '<p class="s-sub">Nothing else listed.</p>'}
-      <button class="more" data-open="day" data-key="${e.date}">See the whole night ›</button>`,
+      ${d.sameNight.length ? d.sameNight.map((x) => row(x)).join('') : '<p class="s-sub">Nothing else listed.</p>'}
+      <a class="more" href="#day/${e.date}">See the whole day ›</a>`,
     acts: `${planButtons(e)}<button class="pb" data-act="hide" data-id="${e.id}">Hide</button>
       ${isHttp(e.ticket_url) ? `<a class="tix" href="${esc(e.ticket_url)}" target="_blank" rel="noopener">Tickets →</a>` : ''}`,
   };
@@ -453,14 +713,14 @@ function sheetFilm(f) {
     times = [...byDay].slice(0, 6).map(([date, list]) => `<p class="s-text"><strong>${esc(dayName(date))}</strong> · ${esc(list.join(', '))}</p>`).join('');
   }
   const scores = [f.mc_score != null ? `Metacritic ${f.mc_score}` : '', f.rt_score != null ? `Rotten Tomatoes ${f.rt_score}%` : ''].filter(Boolean);
-  const reason = (f._reasons || [])[0];
+  const notes = (f._reasons || []).map((r) => r.text).filter((t) => !/^(Metacritic|Rotten)/.test(t));
   return {
     body: `<p class="s-eye">Film${f.times ? ` · ${esc(dayName(f.date))} · ${esc(shortDate(f.date))}` : ''}</p>
       <div class="s-title">${esc(f.title)}</div>
       <p class="s-sub">${esc([f.year, f.rating, runtime(f.runtime), f.genre].filter(Boolean).join(' · '))}</p>
       <p class="s-sub">${esc([f.venue, f.city].filter(Boolean).join(' · '))}</p>
       ${isHttp(f.poster_url) ? `<img class="poster" src="${esc(f.poster_url)}" alt="" loading="lazy" />` : ''}
-      ${reason ? `<p class="s-text">${GLYPH.film} ${esc(reason.text)}</p>` : ''}
+      ${notes.length ? `<p class="s-text">${GLYPH.film} ${esc(notes.join(' · '))}</p>` : ''}
       ${f.director || f.starring ? `<p class="s-text">${esc([f.director ? `Directed by ${f.director}` : '', f.starring ? `With ${f.starring}` : ''].filter(Boolean).join('. '))}</p>` : ''}
       ${f.synopsis ? `<p class="s-text">${esc(f.synopsis)}</p>` : ''}
       ${scores.length ? `<div class="tags">${scores.map((s) => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}
@@ -468,21 +728,6 @@ function sheetFilm(f) {
     acts: `<button class="pb" data-act="hide-film" data-id="${f.movie_id}">Hide film</button>
       ${isHttp(f.trailer_url) ? `<a class="pb" href="${esc(f.trailer_url)}" target="_blank" rel="noopener">Trailer</a>` : ''}
       ${isHttp(f.ticket_url) ? `<a class="tix" href="${esc(f.ticket_url)}" target="_blank" rel="noopener">Tickets →</a>` : ''}`,
-  };
-}
-
-function sheetDay(d) {
-  const counts = [`${d.shows.length} ${d.shows.length === 1 ? 'show' : 'shows'}`, d.films.length ? `${d.films.length} ${d.films.length === 1 ? 'film' : 'films'}` : '']
-    .filter(Boolean)
-    .join(' · ');
-  return {
-    body: `<p class="s-eye">${esc(shortDate(d.date))}</p>
-      <div class="s-title">${esc(dayName(d.date))}</div>
-      <p class="s-sub">${counts}. Best first.</p>
-      ${d.shows.length ? `<div class="s-h">Shows</div>${d.shows.map((e) => row(e, { why: true })).join('')}` : ''}
-      ${d.films.length ? `<div class="s-h">At the movies</div>${d.films.map((f) => row(f, { why: true })).join('')}` : ''}
-      ${!d.shows.length && !d.films.length ? '<p class="s-sub">Nothing listed for this night.</p>' : ''}`,
-    acts: '',
   };
 }
 
@@ -557,7 +802,8 @@ async function loadArtistProfile(top) {
   if (a.profile?.fresh || a.profileLoading || a.profileTried) return;
   a.profileLoading = true;
   try {
-    const profile = await api(`/api/artist/profile?name=${encodeURIComponent(top.key)}`);
+    const hint = top.hint ? `&hint=${encodeURIComponent(top.hint)}` : '';
+    const profile = await api(`/api/artist/profile?name=${encodeURIComponent(top.key)}${hint}`);
     if (profile) a.profile = profile;
   } catch {
     /* the sheet keeps what it has */
@@ -574,7 +820,7 @@ function sheetVenue(v) {
       <div class="s-title">${esc(v.name)}</div>
       ${where ? `<p class="s-sub">${esc(where)}</p>` : ''}
       <div class="s-h">Next shows here</div>
-      ${v.upcoming.length ? v.upcoming.map((e) => row(e, { day: true, why: true })).join('') : '<p class="s-sub">Nothing listed in the next two months.</p>'}`,
+      ${v.upcoming.length ? v.upcoming.map((e) => row(e, { day: true })).join('') : '<p class="s-sub">Nothing listed in the next two months.</p>'}`,
     acts: '',
   };
 }
@@ -601,7 +847,6 @@ function sheetAdd() {
 
 const SHEETS = {
   event: { url: (k) => `/api/events/${encodeURIComponent(k)}/details`, render: sheetEvent },
-  day: { url: (k) => `/api/views/day?date=${encodeURIComponent(k)}`, render: sheetDay },
   artist: { url: (k) => `/api/artist?name=${encodeURIComponent(k)}`, render: sheetArtist, after: loadArtistProfile },
   venue: { url: (k) => `/api/venue?name=${encodeURIComponent(k)}`, render: sheetVenue },
   film: { local: (k) => films.get(k), render: sheetFilm },
@@ -668,17 +913,22 @@ document.addEventListener('error', (ev) => {
 }, true);
 
 // ── Song previews ───────────────────────────────────────────────────────────
-// One player for the whole app: tapping a song plays its preview, tapping it
-// again pauses, and closing or leaving the sheet stops it.
+// One player for the whole app: tapping a song (in a list, on a ticket, in
+// the artist sheet) plays its preview, tapping it again pauses, and leaving
+// the screen or the sheet stops it.
 const player = new Audio();
 player.preload = 'none';
+// The element that shows a preview's progress: the song, row or ticket around the button.
+const progressHost = (el) => el.closest('.song, .row, .tk, .actrow') || el;
 function syncPlayer() {
   const current = player.src && !player.paused && !player.error ? player.src : null;
-  sheetBody.querySelectorAll('.song').forEach((el) => {
-    const on = current && decodeURIComponent(el.dataset.key) === current;
-    el.classList.toggle('playing', Boolean(on));
+  document.querySelectorAll('[data-act="play"]').forEach((el) => {
+    const on = Boolean(current) && decodeURIComponent(el.dataset.key) === current;
+    el.classList.toggle('playing', on);
     el.setAttribute('aria-pressed', on ? 'true' : 'false');
-    if (!on) el.style.setProperty('--p', '0');
+    const host = progressHost(el);
+    host.classList.toggle('playing', on);
+    if (!on) host.style.setProperty('--p', '0');
   });
 }
 function playPreview(url) {
@@ -698,16 +948,18 @@ player.addEventListener('error', () => {
   syncPlayer();
 });
 player.addEventListener('timeupdate', () => {
-  const el = [...sheetBody.querySelectorAll('.song.playing')][0];
-  if (el && player.duration) el.style.setProperty('--p', String(player.currentTime / player.duration));
+  if (!player.duration) return;
+  document.querySelectorAll('[data-act="play"].playing').forEach((el) => {
+    progressHost(el).style.setProperty('--p', String(player.currentTime / player.duration));
+  });
 });
 
-function openSheet(type, key) {
+function openSheet(type, key, extra = {}) {
   if (!sheet.stack.length) sheet.opener = document.activeElement;
   stopPreview();
   const top = sheet.stack[sheet.stack.length - 1];
   if (top && top.type === type && top.key === key) return;
-  sheet.stack.push({ type, key, data: null });
+  sheet.stack.push({ type, key, data: null, ...extra });
   renderSheet().then(() => { sheetBody.scrollTop = 0; });
 }
 
@@ -744,9 +996,13 @@ async function changePlan(id, target) {
     copy.interested = plan ? 1 : 0;
   }
   toast(plan === 'going' ? 'You’re going. It’s in Saved.' : plan === 'maybe' ? 'Saved as Maybe.' : 'Removed from your plans.');
-  if (state.route === 'saved') await loadSaved();
-  else render();
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
   if (sheet.stack.length) renderSheet();
+  // Plans change the picks (a Going show leads its day), so the screen's
+  // data is fetched again; the page keeps its place.
+  load({ quiet: true });
 }
 
 async function hideEvent(id) {
@@ -758,7 +1014,7 @@ async function hideEvent(id) {
   }
   toast('Hidden. Settings → Clear hidden brings it back.');
   closeSheet();
-  load();
+  load({ quiet: true });
 }
 
 async function hideFilm(movieId, value = true) {
@@ -771,7 +1027,7 @@ async function hideFilm(movieId, value = true) {
   toast(value ? 'Film hidden. Explore → Film → Show what’s left out brings it back.' : 'Film is back in the listings.');
   closeSheet();
   state.movies = null;
-  load();
+  load({ quiet: true });
 }
 
 async function addFavorite(name) {
@@ -785,7 +1041,7 @@ async function addFavorite(name) {
   const top = sheet.stack[sheet.stack.length - 1];
   if (top?.type === 'artist') top.data = { ...top.data, favorite: true };
   renderSheet();
-  load();
+  load({ quiet: true });
 }
 
 async function submitAdd() {
@@ -806,7 +1062,7 @@ async function submitAdd() {
   }
   toast('Show added.');
   closeSheet();
-  load();
+  load({ quiet: true });
 }
 
 async function copyFeed() {
@@ -824,7 +1080,7 @@ async function copyFeed() {
 function exploreParams() {
   const x = state.explore;
   const p = new URLSearchParams();
-  if (x.type === 'music' || x.type === 'comedy') p.set('category', x.type);
+  if (['music', 'comedy', 'other'].includes(x.type)) p.set('category', x.type);
   if (x.city !== 'all') p.set('city', x.city);
   if (x.q) p.set('search', x.q);
   return p;
@@ -847,10 +1103,18 @@ async function loadExploreResults({ append = false } = {}) {
   p.set('sort', x.sort);
   p.set('page', String(x.page));
   p.set('pageSize', '60');
+  // Films come along with "Everything" by date, a page's worth of days at a time.
+  const withFilms = x.type === 'all' && x.sort === 'date' && !x.q;
+  if (withFilms) {
+    p.set('withFilms', '1');
+    if (append && x.filmsTo) p.set('filmsFrom', addDays(x.filmsTo, 1));
+  }
   x.loading = true;
   try {
     const r = await api(`/api/events?${p}`);
     x.events = append ? x.events.concat(r.events) : r.events;
+    x.films = withFilms ? { ...(append ? x.films : {}), ...(r.films || {}) } : {};
+    x.filmsTo = withFilms ? r.filmsTo || x.filmsTo : null;
     x.total = r.total;
     x.pages = r.pages;
   } finally {
@@ -866,57 +1130,120 @@ async function refreshResults({ append = false } = {}) {
     toast('Couldn’t load shows. Is EventLight running?');
   }
   const box = document.getElementById('x-results');
-  if (state.route === 'explore' && box) box.innerHTML = renderResults();
+  if (state.route === 'explore' && box) {
+    box.innerHTML = renderResults();
+    syncPlayer();
+  }
 }
 
 // ── Routing ─────────────────────────────────────────────────────────────────
+// #week, #explore, #saved, and #day/YYYY-MM-DD (also #day/today, #day/tomorrow).
 const ROUTES = ['week', 'explore', 'saved'];
 
 function render() {
   const r = state.route;
-  view.innerHTML = r === 'week' ? renderWeek() : r === 'explore' ? renderExplore() : renderSaved();
+  view.innerHTML = r === 'week' ? renderWeek() : r === 'explore' ? renderExplore() : r === 'day' ? renderDay() : renderSaved();
+  syncPlayer();
 }
 
 async function loadSaved() {
   const [saved, curated] = await Promise.all([api('/api/views/saved'), api('/api/views/curated').catch(() => null)]);
   state.saved = saved;
   state.curated = curated;
-  if (state.route === 'saved') render();
 }
 
-async function load() {
+async function loadDay() {
+  const date = state.day;
+  const d = await api(`/api/views/day?date=${encodeURIComponent(date)}`);
+  state.today = d.today;
+  // A past day shows today's page, under today's address.
+  if (d.date !== date && state.day === date) {
+    state.day = d.date;
+    state.hash = `#day/${d.date}`;
+    history.replaceState(null, '', state.hash);
+  }
+  state.dayData = d;
+}
+
+// Fetch the current screen's data and draw it. `quiet` keeps what's on
+// screen, and the scroll position, until the new data arrives.
+async function load({ quiet = false } = {}) {
   const r = state.route;
+  const hash = state.hash;
   try {
     if (r === 'week') {
       const brief = await api('/api/views/brief');
       state.brief = brief;
       state.today = brief.today;
+    } else if (r === 'day') {
+      await loadDay();
     } else if (r === 'explore') {
       if (!state.facets.cities.length) state.facets = await api('/api/filters').catch(() => state.facets);
       state.explore.page = 1;
       await loadExploreResults();
     } else if (r === 'saved') {
       await loadSaved();
-      return;
     }
   } catch {
-    view.innerHTML = '<div class="empty"><strong>Can’t reach EventLight</strong>Check that the server is running, then reload.</div>';
+    if (!quiet) view.innerHTML = '<div class="empty"><strong>Can’t reach EventLight</strong>Check that the server is running, then reload.</div>';
     return;
   }
-  if (state.route === r) render();
+  if (state.hash !== hash && !(r === 'day' && state.route === 'day')) return;
+  const y = window.scrollY;
+  render();
+  if (quiet) window.scrollTo(0, y);
+  else if (r === 'day') document.getElementById('day-title')?.focus({ preventScroll: true });
+}
+
+// Move to another day from a day page. It replaces the address rather than
+// adding to history, so Back still returns to where you came from.
+function goDay(date) {
+  if (!isISODate(date)) return;
+  location.replace(`#day/${date}`);
 }
 
 function route() {
-  const r = location.hash.replace('#', '');
-  state.route = ROUTES.includes(r) ? r : 'week';
+  const prev = state.hash;
+  if (prev && state.route !== 'day') state.scroll[prev] = window.scrollY;
+  const raw = location.hash.replace('#', '');
+  const m = /^day\/(\d{4}-\d{2}-\d{2}|today|tomorrow)$/.exec(raw);
+  stopPreview();
+  closeSheet();
+  if (m) {
+    const date = m[1] === 'today' ? state.today : m[1] === 'tomorrow' ? addDays(state.today, 1) : m[1];
+    if (m[1] !== date) {
+      location.replace(`#day/${date}`);
+      return;
+    }
+    // Opened from the Week or Explore, "‹ Week" goes back there; moving from
+    // day to day keeps it.
+    if (state.route !== 'day') state.dayFrom = prev && ['week', 'explore'].includes(state.route) ? state.route : null;
+    if (state.day !== date) state.open = new Set();
+    state.route = 'day';
+    state.day = date;
+    state.hash = `#day/${date}`;
+  } else {
+    state.route = ROUTES.includes(raw) ? raw : 'week';
+    state.hash = `#${state.route}`;
+  }
+  const nav = state.route === 'day' ? 'week' : state.route;
   document.querySelectorAll('[data-nav]').forEach((a) => {
-    if (a.dataset.nav === state.route) a.setAttribute('aria-current', 'page');
+    if (a.dataset.nav === nav) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
-  closeSheet();
+  // Coming back to the Week or Explore: draw what we had, where we were,
+  // then refresh the Week quietly.
+  const y = state.scroll[state.hash];
+  const have = (state.route === 'week' && state.brief) || (state.route === 'explore' && state.explore.events.length);
+  if (have && y != null) {
+    render();
+    window.scrollTo(0, y);
+    if (state.route === 'week') load({ quiet: true });
+    return;
+  }
   render();
-  load();
   window.scrollTo(0, 0);
+  load();
 }
 
 async function loadStatus() {
@@ -941,14 +1268,18 @@ document.addEventListener('click', (ev) => {
   }
   const btn = ev.target.closest('button');
   if (!btn || btn.disabled) return;
-  const { plan, id, open, key, act } = btn.dataset;
+  const { plan, id, open, key, act, day, hint } = btn.dataset;
   if (plan) {
     changePlan(Number(id), plan);
     return;
   }
+  if (day) {
+    goDay(day);
+    return;
+  }
   if (open) {
     const k = open === 'artist' || open === 'venue' ? decodeURIComponent(key) : key;
-    openSheet(open, k);
+    openSheet(open, k, hint ? { hint } : {});
     return;
   }
   const x = state.explore;
@@ -958,6 +1289,18 @@ document.addEventListener('click', (ev) => {
     case 'back': stopPreview(); sheet.stack.pop(); renderSheet(); break;
     case 'play': playPreview(decodeURIComponent(key)); break;
     case 'morepicks': state.morePicks = !state.morePicks; render(); break;
+    case 'day-back':
+      if (state.dayFrom) history.back();
+      else location.hash = '#week';
+      break;
+    case 'fold': {
+      if (state.open.has(key)) state.open.delete(key);
+      else state.open.add(key);
+      const y = window.scrollY;
+      render();
+      window.scrollTo(0, y);
+      break;
+    }
     case 'hide': hideEvent(Number(id)); break;
     case 'hide-film': hideFilm(Number(id)); break;
     case 'unhide-film': hideFilm(Number(id), false); break;
@@ -1015,7 +1358,16 @@ document.addEventListener('submit', (ev) => {
   }
 });
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape' && sheet.stack.length) closeSheet();
+  if (ev.key === 'Escape' && sheet.stack.length) {
+    closeSheet();
+    return;
+  }
+  // ← / → step through days on a day page (not while typing or in the sheet).
+  if (state.route !== 'day' || sheet.stack.length || ev.altKey || ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
+  if (ev.target.closest?.('input, select, textarea')) return;
+  const d = state.dayData;
+  if (ev.key === 'ArrowLeft' && d?.prev) goDay(d.prev.date);
+  if (ev.key === 'ArrowRight' && d?.next) goDay(d.next.date);
 });
 
 window.addEventListener('hashchange', route);
