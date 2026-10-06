@@ -56,6 +56,13 @@ test('parseLineup: non-artist events yield no lineup', () => {
   assert.deepEqual(parseLineup('Disney Worlds Collide Concert Tour'), []);
 });
 
+test('parseLineup: "almost / nearly sold out" is ticketing noise, before or after the act', () => {
+  assert.deepEqual(parseLineup('ALMOST SOLD OUT: Wet Leg'), ['Wet Leg']);
+  assert.deepEqual(parseLineup('NEARLY SOLD OUT! Wet Leg w/ PUP'), ['Wet Leg', 'PUP']);
+  assert.deepEqual(parseLineup('Wet Leg - Almost Sold Out!'), ['Wet Leg']);
+  assert.deepEqual(parseLineup('Wet Leg (Nearly Sold Out)'), ['Wet Leg']);
+});
+
 test('parseLineup: API artist leads, support text is appended', () => {
   assert.deepEqual(parseLineup('JUNGLE', { support: 'RIO KOSTA' }), ['JUNGLE', 'RIO KOSTA']);
   assert.deepEqual(parseLineup('Failure', { support: 'with quannnic' }), ['Failure', 'quannnic']);

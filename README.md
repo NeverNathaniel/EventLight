@@ -2,12 +2,16 @@
 
 A self-hosted dashboard for live **music** and **comedy** across **Seattle, Tacoma, and the South Sound**. EventLight pulls events from APIs, RSS/iCal feeds, and headless web scrapers on a schedule, merges them into one deduplicated list, scores them against your taste, and shows you the week at a glance, with your top picks printed as tickets.
 
-- **Week** — the next seven days from today: your top picks, each night's short list (shows and films), and your artists' shows further out
-- **Explore** — search and browse everything, as a list or a month calendar; **Film** has the cinema listings
+- **Week** — the next seven days from today: your top picks, each day's picks and films, and your artists' shows further out
+- **A page for each day** — tap a day for its own page: up to three picks, your other plans, then everything else (music, comedy, the movies, around town), with the weekly regulars folded away
+- **Everything says what it is** — every listing is tagged Music, Stand-up, Film, Theater, Drag, Trivia, Karaoke, DJ night, Open mic… and flagged when it's sold out, free, one night only or a last chance
+- **A feel for it before you tap** — each listing shows its genres (yours highlighted), who it's for (_"For fans of Joyce Manor, Jeff Rosenstock"_) or who it sounds like, a one-line description of the act, and a play button for their best-known song
+- **Curated** — picks are spread across music, comedy and film rather than five punk shows, weekly nights don't crowd out one-offs, and films are ranked by reviews, one-night screenings and last chances
+- **Explore** — search and browse everything (films included), as a list or a month calendar, with each day's films alongside its shows; Music, Comedy and Around town group shows the same way the day pages do; **Film** has the cinema listings, best first
 - **Saved** — the shows you're **Going** to and the ones marked **Maybe**, plus Claude's curated lists
-- **Tap into anything** — a show, a night, an artist or a venue opens with the details: who's on the bill, why it's a pick, what else is on that night, and the artist's other dates
+- **Tap into anything** — a show, an artist or a venue opens with the details: who's on the bill, why it's a pick, what else is on that night, and the artist's other dates
 - **Artist pages** — a photo and short bio, where they're from, top songs with previews you can play right there, similar artists, and links to Apple Music, Spotify, Bandcamp and their website
-- **Phone or desktop** — one column on a phone; on a wide screen the Week, Explore and Saved screens spread into columns
+- **Phone or desktop** — one column on a phone; on a wide screen the Week, day, Explore and Saved screens spread into columns
 - **Going / Maybe** — mark your plans; Going shows feed a calendar link you can subscribe to on your phone
 - **Movies** — what's playing at The Grand Cinema (Tacoma), with kids' movies and vapid action movies filtered out
 - **Preference engine** — favorite artists, "sounds like your favorites" discovery, genre weights, and learning from what you star — every pick says *why* it ranks
@@ -141,6 +145,8 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 | `PUBLIC_URL` | Where you open EventLight (e.g. `http://nas.local:3000`); tapping the digest opens it |
 | `HOME_CITY` / `HOME_BOOST` | Defaults for **Close to Home**: your home city (default `Tacoma`) and the boost for shows near it, in percent (`0`, `25`, `50` or `100`; default `50`). Settings overrides both |
 | `ENRICH_MAX_LOOKUPS` | API calls the enrichment step may spend per refresh (default `150`, ~1/sec) — results are cached, so later refreshes only look up new artists |
+| `PROFILE_PREFETCH` | `true` (default) to look up the coming headliners' artist profiles (description, top song preview) in the background after each refresh, so rows can say what an act is before you open it; `false` to look profiles up only when you open an artist |
+| `PROFILE_PREFETCH_MAX` | Artist profiles the background lookup may fetch per refresh (default `40`; Apple's limit makes that about six minutes) — results are cached for 30 days |
 
 > API keys are **never** hardcoded — they're read from `.env` exclusively. The Settings page reports only whether each key is configured, never its value.
 
@@ -278,21 +284,45 @@ Scores are computed at query time and used for **Top picks** and Explore's **Bes
 **Artist pages** (`src/enrich/profile.js`). The first time you open an artist, EventLight looks them up and caches the result in SQLite (`artist_profiles`) for 30 days. All of the sources are free and need no key:
 
 - [MusicBrainz](https://musicbrainz.org/): solo artist or band, hometown, year formed, a one-line description, and links: their website, Bandcamp, Spotify, YouTube, and their Apple Music id, which picks the right artist on Apple when two share a name.
-- [Wikipedia](https://en.wikipedia.org/), through the Wikidata link: a one-paragraph bio and a photo.
+- [Wikipedia](https://en.wikipedia.org/), through the Wikidata link: a one-paragraph bio and a photo. A comedian MusicBrainz doesn't know is looked up by name ("Name", then "Name (comedian)"), and the page is only used when its short description says they perform. Bands aren't looked up by name: one MusicBrainz doesn't know is usually local, and a page under its name is more likely another band's.
 - Apple's [iTunes Search API](https://performance-partners.apple.com/search-api): the Apple Music page and up to five top songs, most popular first, each with Apple's 30-second preview to play in the page. The Apple Music button opens the Music app for full songs.
 - [ListenBrainz](https://listenbrainz.org/): similar artists, when there isn't a list for them already.
 
-The first lookup takes a few seconds. The sheet shows what EventLight already knows straight away and fills in the rest when it arrives. If a source fails or is rate-limited, the profile is saved as partial and re-checked within the hour, and a re-check never wipes what an earlier lookup found.
+Profiles for the coming weeks' acts are also looked up in the background after each refresh (see [Curation](#curation)), so most listings can show a description and a song before anyone opens them. Otherwise the first lookup takes a few seconds: the sheet shows what EventLight already knows straight away and fills in the rest when it arrives. If a source fails or is rate-limited, the profile is saved as partial and re-checked within the hour, and a re-check never wipes what an earlier lookup found.
 
 **Sounds like** compares each artist's similar-artist list with each favorite's, by cosine similarity with inverse-document-frequency weighting. That catches direct links (an act on a favorite's list) and shared-fan links (Movements' listeners also play Joyce Manor and Modern Baseball, both close to PUP), while hub artists that sit on every list — Radiohead, The Beatles — count for little.
 
-**Top picks** on the Week screen are the best-scoring shows in the next seven days (a score of 8 or more, roughly a favorite or sound-alike on the bill, or a strong genre match close to home). **Further out** lists every show by a favorite or starred artist after that, up to a year ahead, since those tours announce months ahead. The weekly digest and `/api/views/top-picks` look 30 days out.
+**Top picks** on the Week screen are the strongest shows in the next seven days (a pick score of 8 or more, roughly a favorite or sound-alike on the bill, or a strong genre match close to home), at most two a day and one per headliner; see [Curation](#curation). **Further out** lists every show by a favorite or starred artist after that, up to a year ahead, since those tours announce months ahead. The weekly digest and `/api/views/top-picks` look 30 days out.
 
 **Taste-profile seeding:** if a `taste-profile.json` exists at the repo root, it's imported idempotently on startup. Its genres (derived from the owner's Spotify top artists/tracks) become genre weights, and its artists (Spotify plus the owner's own list) become favorite artists.
 - **Genres** are re-applied when `generated_at` changes.
 - **Artists** are re-applied when `artists_updated_at` changes. Listed artists get the file's weights; favorites added or removed in Settings are otherwise left alone.
 
 Editing the artist list therefore never resets genre weights you've tuned in Settings. Delete the file to opt out.
+
+---
+
+## Curation
+
+The preference score says how close a show is to your taste. Curation turns that into a short, varied list you can trust, and makes every listing tell you what it is before you tap it. All of it is computed from data EventLight already has; nothing on a page waits on the network.
+
+**What it is** (`src/kinds.js`). Sources only say music, comedy or "other", so the kind is read from the title and the source's tags: Music, Classical, Festival, Tribute, Stand-up, Improv, Podcast, Film, Screening, Theater, Drag, Cabaret, Talk, Open mic, Jam, DJ night, Karaoke, Trivia, Bingo, Dance, Market, Class, or Event. Band names are the hazard (Bingo Players, Film School, Pearl Jam): when the headliner is an artist MusicBrainz knows, their name is taken out of the title before the rules run, and "jam" only counts with a qualifier ("jazz jam", "jam session"). Flags come from the title and price: Cancelled, Sold out, Few left, Release show, Free, and for films One night only, Last chance and Opens.
+
+**Regulars and runs.** A night that repeats at the same venue (the same title once dates, numbers and weekdays are stripped) is a regular: three or more dates a week, two weeks or a month apart, or two dates a week apart for trivia, karaoke and the like. Regulars show their cadence ("Every Thu"), are folded into **Every week** on the day page, and never take a pick unless a favorite is playing. A comedian on three nights running is a run ("Thu–Sat"), not a regular.
+
+**The feel line** (`src/feel.js`). Each listing shows:
+- **Genres**: the headliner's own MusicBrainz tags (never an opener's), then the source's, then Apple's, at most three, most specific first (`pop punk` rather than `punk`), with the ones you weight highlighted. With nothing known about the act, the venue's usual sound ("usually garage · punk here") or the size of the bill.
+- **Who it's for**: a favorite on the bill, the favorite it sounds like, or **For fans of** the headliner's closest ListenBrainz neighbours, your favorites first and hub artists that sit on every list pushed down.
+- **What the act is**: a one-line description from the artist's profile ("Canadian indie pop band", "American stand-up comedian").
+- **A song to play**: the headliner's best-known song as a 30-second preview, when Apple's match is certain (the id MusicBrainz links to, or an exact, unambiguous name whose genre fits).
+
+Profiles are looked up in the background after each refresh (`src/enrich/prefetch.js`): this week's likely picks first, then other known acts this week, comedians for the next two weeks, then strong matches up to a month out. It's a few dozen a run, paced well under MusicBrainz's and Apple's limits, and they're cached for 30 days.
+
+**Picks** (`src/curation.js`). Each listing gets a pick score: the preference score, plus a little for an act we know about, a release or farewell show, and for comedy, a notable comedian (a profile, or a Ticketmaster listing) over an open mic. Your plans count (Going leads its day), and sold-out shows sink. A day's picks are chosen greedily, at most three: each pick from the same family (music, comedy, film), venue or genre as one already chosen counts for less, a headliner is never picked twice, at most one is a film, and nothing below 3 is ever forced in. So a night with three punk shows, a one-night film and a comedian gets the two best punk shows and the film. The same picks show on the Week and on the day's page, each labelled: The pick, Your plan, One night only, At the movies, For a laugh, Also good.
+
+**Films** are scored on their own terms: a one-night or special screening, then reviews (Metacritic, or Rotten Tomatoes), a last chance (the final day or two of a run, when the theater has posted dates beyond it) or an opening night (only when the first listed date sits by the film's release date — theaters only list what's still to come, so a run with a day off would otherwise look like it opens again), and restorations. A regular run only becomes a pick on its opening or last-chance day, and only when it's well reviewed.
+
+**A sentence for each day**, built from its picks (_"A favorite at the Tractor Tavern, Wet Leg, who sounds like Alvvays and a one-night Paris, Texas."_), and one for the week (_"Best night: Friday (PUP). Quiet: Mon, Tue."_). The `/curate` routine's reasons, when fresh, lift those shows and show as their reason.
 
 ---
 
@@ -315,7 +345,7 @@ Anyone who knows a topic on ntfy.sh can read it, which is why the generated one 
 
 ## Movies
 
-Everything showing at [The Grand Cinema](https://grandcinema.com) in Tacoma over the next six weeks is in **Explore → Film**, and on the Week screen alongside shows: a one-night screening can make a night's short list, and every film showing that night is in its day view. Explore → Film has three sections:
+Everything showing at [The Grand Cinema](https://grandcinema.com) in Tacoma over the next six weeks is in **Explore → Film**, and alongside the shows everywhere else: each day on the Week screen has a line for its films, every film showing that day is on the day's page under **At the movies** (one-nights first, then last chances, openings and the best reviewed), Explore's list by date has each day's films, and a one-night screening or a well-reviewed film on its last day can be one of the day's picks. Explore → Film has three sections:
 
 - **Now Playing**: current runs, leaving-soonest first.
 - **Special Screenings**: one-nights, repertory, and the Tacoma Film Festival (films with three or fewer showtimes), as a day-by-day program. A regular run stays in Now Playing through its last days.
@@ -373,7 +403,11 @@ src/
   enrich/          artist genres (MusicBrainz), similar artists (ListenBrainz), artist profiles (+ Wikipedia, Apple)
   cinema/          movie listings (The Grand Cinema via Indy Systems), Wikidata facts, kids/action filter
   lineup.js        parse the bill (headliner, support) out of an event title
-  week.js          the Week screen, plus the show, night, artist and venue details
+  kinds.js         what a listing is (Music, Stand-up, Trivia…), its flags, and recurring-night keys
+  feel.js          the line under each listing: genres, for fans of, a descriptor, a song preview
+  curation.js      pick scores, each day's picks, the week's tickets, regulars, film scores, the day's sentence
+  annotate.js      dresses a list of shows and films with all of the above
+  week.js          the Week screen and the day pages, plus the show, artist and venue details
   cli/             refresh + export-events commands
   discovery.js     paste-a-URL source auto-discovery (RSS/iCal/JSON-LD/scrape)
   public/          frontend (HTML, CSS, vanilla JS; Settings uses Alpine.js, vendored)
@@ -394,8 +428,8 @@ data/events.db     SQLite database (created at runtime, gitignored)
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/api/views/brief` | The Week screen: the next 7 days from today (`days`, each with its short list), `picks`, and `further` (your artists' shows after that) |
-| `GET` | `/api/views/day?date=YYYY-MM-DD` | One night: shows best-first, and films |
+| `GET` | `/api/views/brief` | The Week screen: the next 7 days from today (`days`, each with its `picks`, `dek`, `counts` and a `films` line), the week's `picks`, a `note`, and `further` (your artists' shows after that) |
+| `GET` | `/api/views/day?date=YYYY-MM-DD` | A day's page: `picks` (each with a `_role`), `plans`, `groups` (music, comedy, film, around), `regulars`, `started` (today only), the `strip` of days around it, `prev`/`next`, `dek` and `counts`. A past date returns today's page |
 | `GET` | `/api/views/saved` | Upcoming `going` and `maybe` shows |
 | `GET` | `/api/events/:id/details` | A show with its lineup (genres, favorites, sound-alikes), what else is on that night, and distance from home |
 | `GET` | `/api/artist?name=…` | An artist: how they connect to your taste, their upcoming dates, and their cached `profile` |
@@ -409,8 +443,8 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `GET` | `/api/views/curated` | The `/curate` routine's ranked picks (from `data/curated.json`) |
 | `GET` | `/api/views/movies` | Cinema listings: `nowPlaying`, `special`, `comingSoon`, `filtered` (with reasons), `hidden` |
 | `POST` | `/api/movies/:id/hidden` | Hide (or `{ "value": false }` to unhide) a film |
-| `GET` | `/api/views/month?month=YYYY-MM` | Calendar counts + events |
-| `GET` | `/api/events` | Paginated, filterable, sortable list |
+| `GET` | `/api/views/month?month=YYYY-MM` | Calendar counts (shows, plus each film once on each day it shows) + events |
+| `GET` | `/api/events` | Paginated, filterable, sortable list. With `withFilms=1` (sorted by date, no category or search) it also returns `films` by date from `filmsFrom` through the last date on the page, and `filmsTo`, so the next page asks from the day after |
 | `POST` | `/api/events` | Add an event manually |
 | `POST` | `/api/events/:id/interested` | Toggle interested (records signals) |
 | `POST` | `/api/events/:id/hidden` | Hide an event |
@@ -428,7 +462,7 @@ data/events.db     SQLite database (created at runtime, gitignored)
 | `POST` | `/api/discover/add` | Save a discovered source to `feeds.json` / `scrapers.json` |
 | `GET` | `/api/export/ics` | Download interested events as `.ics` |
 
-All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInterested`, `showHidden`) apply to the view endpoints too.
+All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInterested`, `showHidden`) apply to the view endpoints too. Listings from the Week, day, Explore, Saved and detail endpoints carry what curation adds: `_kind`, `_flags`, `_headline`, `_regular`, `_run`, `_times`, `_feel` and `_pick`.
 
 ---
 
@@ -438,7 +472,7 @@ All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInter
 npm test
 ```
 
-Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, the Week screen (the rolling seven days, top picks, films alongside shows, Going / Maybe, show and artist details), artist profiles (parsing MusicBrainz, Wikipedia and Apple answers, caching, partial lookups), and the `.ics` builder.
+Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, the Week screen and day pages (the rolling seven days, top picks, each day's picks matching its page, films alongside shows, Going / Maybe, show and artist details), the listings API (films a page at a time, calendar counts, kinds), kinds and flags, regulars and runs, picks and the day's sentence, film scores, the feel line (genres, for fans of, descriptors, previews), background profile lookups, artist profiles (parsing MusicBrainz, Wikipedia and Apple answers, caching, partial lookups), and the `.ics` builder.
 
 GitHub Actions runs the same suite on every pull request and every push to `main` (`.github/workflows/test.yml`).
 

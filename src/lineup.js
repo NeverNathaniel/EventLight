@@ -25,9 +25,10 @@ export function artistKey(name) {
   return key || raw.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-// Ticketing / status noise that is never part of a band name.
+// Ticketing / status noise that is never part of a band name. "Almost sold
+// out" goes whole, or "ALMOST SOLD OUT: Wet Leg" would leave "ALMOST Wet Leg".
 const STATUS_RE =
-  /\b(?:sold[\s-]?out|low tickets|few tickets left|cancell?ed|postponed|rescheduled|new date|on sale now|just added|show added|both shows|night (?:one|two|three|\d)|early show|late show|matinee(?: show)?|all ages|(?:partially )?seated|standing room only|\d{2}\+)(?!\w)[!:]*/gi;
+  /\b(?:(?:almost|nearly)\s+sold[\s-]?out|sold[\s-]?out|low tickets|few tickets left|cancell?ed|postponed|rescheduled|new date|on sale now|just added|show added|both shows|night (?:one|two|three|\d)|early show|late show|matinee(?: show)?|all ages|(?:partially )?seated|standing room only|\d{2}\+)(?!\w)[!:]*/gi;
 
 // Words that mark a segment as a tour name / event description rather than an
 // act ("Young Regan Tour", "30th Anniversary Show", "Live at The Valley").

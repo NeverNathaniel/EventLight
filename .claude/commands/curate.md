@@ -15,7 +15,7 @@ $ARGUMENTS
 
 1. Refresh the export so you're working from current data:
    `node src/cli/export-events.js`
-2. Read `data/events-export.json`. Each event has: `id, title, artist, lineup, venue, city, date, time, category, genre_tags, price_range, ticket_url, interested, score, why`. `lineup` is the parsed bill (headliner first); `genre_tags` includes genres looked up for those artists. The `score` field is EventLight's own preference score (higher = closer to the owner's tastes) and `why` lists its reasons — e.g. a favorite artist on the bill, or an act that shares fans with one.
+2. Read `data/events-export.json`. Each event has: `id, title, artist, lineup, venue, city, date, time, category, kind, flags, genre_tags, price_range, ticket_url, interested, score, why`. `kind` says what it is (Music, Stand-up, Theater, Drag, Trivia, DJ night…) and `flags` notes things like Sold out or Free. `lineup` is the parsed bill (headliner first); `genre_tags` includes genres looked up for those artists. The `score` field is EventLight's own preference score (higher = closer to the owner's tastes) and `why` lists its reasons — e.g. a favorite artist on the bill, or an act that shares fans with one.
 3. Select the events that genuinely match the request, and **rank them best-first** using your judgment. Weigh, in roughly this order: how well the act/genre/vibe fits the request; the owner's `score` and `interested` flag; price and date constraints they mentioned; and variety (don't return five near-identical shows if better spread exists). Be willing to return a short, high-quality list rather than padding it.
 4. Write `data/curated.json` with exactly this shape:
    ```json

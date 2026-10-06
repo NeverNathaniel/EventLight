@@ -24,8 +24,8 @@ import {
 } from '../db/artists.js';
 import { lookupArtist } from './musicbrainz.js';
 import { similarArtists } from './listenbrainz.js';
+import { mbTurn } from './limits.js';
 
-const MB_DELAY_MS = 1100; // MusicBrainz allows ~1 request/second
 const LB_DELAY_MS = 400;
 const HORIZON_DAYS = 120; // only enrich events this far ahead
 const SEED_SIMILAR_DAYS = 14; // refresh favorites' similar lists every two weeks
@@ -62,7 +62,13 @@ async function resolveArtist(name, budget, fresh) {
   const previous = getArtist(key);
   let row;
   try {
-    const found = await withRetry(() => lookupArtist(name));
+    // MusicBrainz's one-a-second limit is shared with the artist sheet and
+    // the profile prefetch (limits.js); enrichment holds back while someone
+    // is waiting on a sheet.
+    const found = await withRetry(async () => {
+      await mbTurn({ background: true });
+      return lookupArtist(name);
+    });
     row = found
       ? { key, name: found.name, mbid: found.mbid, tags: found.tags, status: 'found' }
       : { key, name, status: 'not_found' };
@@ -85,7 +91,6 @@ async function resolveArtist(name, budget, fresh) {
   }
   saveArtist(row);
   fresh.add(key);
-  await sleep(MB_DELAY_MS);
   return getArtist(key);
 }
 

@@ -1,10 +1,13 @@
 // Scheduled ingestion via node-cron. Runs all adapters on REFRESH_CRON
 // (default every 6 hours) and guards against overlapping runs. Alerts for new
-// shows go out after each refresh; the Top Picks digest has its own schedule.
+// shows go out after each refresh, then the coming headliners' artist
+// profiles are looked up in the background; the Top Picks digest has its own
+// schedule.
 import cron from 'node-cron';
 import { runAll, runAdapter, getAdapterById } from '../adapters/index.js';
-import { REFRESH_CRON, REFRESH_ON_START, DIGEST_CRON } from '../config.js';
+import { REFRESH_CRON, REFRESH_ON_START, DIGEST_CRON, PROFILE_PREFETCH } from '../config.js';
 import { runAlerts, sendDigest } from '../alerts/index.js';
+import { prefetchProfiles } from '../enrich/prefetch.js';
 
 const state = {
   running: false,
@@ -15,6 +18,22 @@ const state = {
 
 export function getSchedulerState() {
   return { ...state, cron: REFRESH_CRON };
+}
+
+// Artist profiles for the new listings take minutes (the free services are
+// rate limited), so they're fetched detached from the refresh: "Refreshing…"
+// and the refresh request don't wait for them, and prefetchProfiles keeps its
+// own guard against overlapping runs. setImmediate lets the refresh answer
+// before the prefetch's first (synchronous) scoring pass.
+function startPrefetch() {
+  if (!PROFILE_PREFETCH) return;
+  setImmediate(() => {
+    prefetchProfiles()
+      .then((r) => {
+        if (r.fetched) console.log(`[profiles] Looked up ${r.fetched} artist profile(s) (${r.found} found, stopped: ${r.stoppedBy})`);
+      })
+      .catch((err) => console.error('[profiles] background lookups failed:', err.message));
+  });
 }
 
 // Run all adapters, guarding against concurrent invocations.
@@ -32,6 +51,7 @@ export async function triggerRefresh() {
   } finally {
     state.lastFinishedAt = new Date().toISOString();
     state.running = false;
+    startPrefetch();
   }
 }
 

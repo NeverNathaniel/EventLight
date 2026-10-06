@@ -112,8 +112,9 @@ export function getUpcomingLineups(fromDate, toDate) {
 // Tags for one lineup entry. A co-bill like "Highly Suspect & Yelawolf" is
 // looked up act by act — but only trusted when *every* act resolves, so a
 // title fragment like "Best Of The 80's & Beyond" can't borrow the tags of
-// some unrelated band called "Beyond".
-function lineupTags(name, tagsByKey) {
+// some unrelated band called "Beyond". Exported for the row's genre line
+// (src/feel.js), which reads the headliner's tags the same way.
+export function lineupTags(name, tagsByKey) {
   const [whole, ...parts] = lineupKeys(name);
   if (tagsByKey.has(whole)) return tagsByKey.get(whole);
   // "Dave Hause & The Mermaid", "Craig Finn & The Band of Forgiveness": a

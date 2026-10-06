@@ -78,6 +78,18 @@ export const ENRICH_MAX_LOOKUPS = Math.max(
 // MusicBrainz asks every client to identify itself with a contact URL.
 export const USER_AGENT = 'EventLight/1.0 (+https://github.com/NeverNathaniel/EventLight)';
 
+// Artist profiles (who an act is, a song to play) for the coming shows'
+// headliners are looked up in the background after each refresh, so a row
+// can say what something is before you open it. At most PROFILE_PREFETCH_MAX
+// a run; with PROFILE_PREFETCH=false they're only looked up when you open an
+// artist.
+export const PROFILE_PREFETCH =
+  String(process.env.PROFILE_PREFETCH ?? 'true').toLowerCase() !== 'false';
+export const PROFILE_PREFETCH_MAX = Math.max(
+  0,
+  parseInt(process.env.PROFILE_PREFETCH_MAX || '40', 10) || 0
+);
+
 // API keys are read lazily so the Settings page can update .env at runtime.
 export function getApiKeys() {
   return {
