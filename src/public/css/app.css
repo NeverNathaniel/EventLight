@@ -268,7 +268,7 @@ input, select { font: inherit; color: inherit; }
 .fc-name { font: 800 1.15rem/1.02 var(--f-display); letter-spacing: 0.02em; text-transform: uppercase; overflow-wrap: anywhere; }
 .fc-ven { font-size: 0.72rem; color: var(--stock-muted); }
 .fc-tags { font: 0.62rem/1.35 var(--f-meta); color: var(--stock-muted); }
-.fc-why { font-size: 0.72rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-why { font-size: 0.72rem; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* ── A day ─────────────────────────────────────────────────────────────── */
 .backlink { background: none; border: 0; padding: 12px 12px 12px 0; min-height: 44px; font: 600 0.66rem/1 var(--f-meta); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
