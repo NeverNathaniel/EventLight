@@ -346,7 +346,8 @@ function dekPart(p) {
     const what = COMEDY_WORDS[kind.key] || 'stand-up';
     return { text: p.city ? `${what} in ${p.city}` : `${what} at ${venue}` };
   }
-  const hit = (p._feel?.tags || []).find((t) => t.hit);
+  // A band is described by its sound; a night (an open mic, a DJ night) by its name.
+  const hit = kind.family === 'music' && (p._feel?.tags || []).find((t) => t.hit);
   if (hit) return { text: `${hit.tag} at ${venue}` };
   return { text: `${titleOf(p)} at ${venue}` };
 }
@@ -381,11 +382,12 @@ function dekPhrases(picks) {
 }
 
 // "A, B and C." with the first letter capitalised — or "A, and B." when a
-// phrase has its own "and", so the last one doesn't run into it.
+// phrase has its own "and" or a "who…" clause, so the last one doesn't run
+// into it ("Movements, who sounds like PUP, and indie rock at the Valley").
 function sentence(parts) {
   let body = parts[0];
   if (parts.length > 1) {
-    const inner = parts.some((x) => / and /.test(x));
+    const inner = parts.some((x) => / and |, who /.test(x));
     body = `${parts.slice(0, -1).join(', ')}${inner ? ', and ' : ' and '}${parts[parts.length - 1]}`;
   }
   return `${body.charAt(0).toUpperCase()}${body.slice(1)}.`;

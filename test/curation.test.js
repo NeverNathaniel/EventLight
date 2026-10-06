@@ -421,6 +421,12 @@ test('dek: your plan leads, and favorites or sound-alikes share a phrase', () =>
     'Favorites at Jazzbones and the Paramount Theatre, and stand-up in Tacoma.',
     'a comma keeps the last phrase from running into the first one’s "and"'
   );
+  assert.equal(
+    dek([sounds('Movements'), music(6, { venue: 'The Valley', _feel: { tags: [{ tag: 'indie rock', hit: true }], known: {} } })]),
+    'Movements, who sounds like Alvvays, and indie rock at the Valley.'
+  );
+  const mic = show('open-mic', 4, { _headline: 'Songwriter Night', venue: 'The Valley', _feel: { tags: [{ tag: 'singer-songwriter', hit: true }], known: {} } });
+  assert.equal(dek([mic]), 'Songwriter Night at the Valley.', 'a night is named, not described by a genre');
 });
 
 test('dek: trailing fragments are dropped to fit 110 characters', () => {

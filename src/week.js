@@ -171,7 +171,15 @@ function countsOf(items) {
   return counts;
 }
 
-const regularKinds = (items) => [...new Set(items.filter((e) => e._regular).map((e) => e._kind.label.toLowerCase()))];
+// What a quiet day's regulars are, for its sentence: "trivia, karaoke", or a
+// music night by name ("Cumbia Night") since "music" says nothing.
+const regularKinds = (items) => [
+  ...new Set(
+    items
+      .filter((e) => e._regular)
+      .map((e) => (e._kind.family === 'music' || e._kind.key === 'event' ? e._headline : e._kind.label.toLowerCase()))
+  ),
+];
 
 // One day's picks and the numbers around them, for the Week screen and the
 // day page's strip.
