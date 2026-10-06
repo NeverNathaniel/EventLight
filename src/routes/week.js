@@ -13,12 +13,31 @@ router.get('/views/brief', (req, res) => {
   res.json(weekBrief());
 });
 
-// A day's page. A missing, malformed or past date gets today's page (the
-// client then shows today's address).
+// Nothing is listed further ahead than a year; a day page past this is a
+// typo or a stale link.
+const DAY_MAX_AHEAD = 400;
+
+// The asked date if it's a real calendar day from today to DAY_MAX_AHEAD
+// days out, else today. The round trip catches dates that only look right:
+// "2026-11-31" would roll over to December 1st, and "2026-12-32" doesn't
+// parse at all.
+function dayFor(asked, today) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asked || '')) return today;
+  let real;
+  try {
+    real = addDays(asked, 0) === asked;
+  } catch {
+    real = false;
+  }
+  if (!real || asked < today || asked > addDays(today, DAY_MAX_AHEAD)) return today;
+  return asked;
+}
+
+// A day's page. A missing, malformed, impossible, past or far-off date gets
+// today's page (the client then shows today's address).
 router.get('/views/day', (req, res) => {
   const today = todayISO();
-  const asked = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : today;
-  res.json(dayPage(asked < today ? today : asked, { today }));
+  res.json(dayPage(dayFor(String(req.query.date || ''), today), { today }));
 });
 
 router.get('/views/saved', (req, res) => {

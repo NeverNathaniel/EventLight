@@ -17,7 +17,9 @@ const { artistKey } = await import('../src/lineup.js');
 const { addDays } = await import('../src/dates.js');
 const {
   loadFacts, headlinerFound, displayTags, fansOf, descriptorOf, previewOf, venueHabits, attachFeel, DESCRIPTOR_RE,
+  describesPerformer,
 } = await import('../src/feel.js');
+const { pickScore } = await import('../src/curation.js');
 
 migrate();
 // Start from a known taste rather than the repo's taste-profile.json.
@@ -105,6 +107,20 @@ profile('Troupe', { type: 'Group', from: 'Chicago, United States', since: '1999'
 profile('Strip Band', { description: 'American comic strip' });
 profile('Fighter', { description: 'American martial artist' });
 profile('Producer Comic', { description: 'American comedian and film producer' });
+// A stand-up whose lookup found only a namesake musician on MusicBrainz (no
+// disambiguation, no Wikipedia page) and that musician on Apple.
+profile('Dana Kole', { type: 'Person', from: 'Dayton, United States', description: null, apple: { genre: 'Rock', match: 'name', songs: [] } });
+// …and comedians MusicBrainz's own record vouches for: linked to an Apple
+// comedy artist, tagged as comedy, or a long description that says so.
+profile('Linked Comic', { type: 'Person', from: 'Dayton, United States', apple: { genre: 'Comedy', match: 'mb', songs: [] } });
+profile('Comic Tagged', { type: 'Person', from: 'Spokane, United States' });
+profile('Wordy Comic', {
+  type: 'Person', from: 'Austin, United States',
+  description: 'American stand-up comedian, actor, writer and podcast host',
+});
+// MusicBrainz links an Apple id the search couldn't find; the name match is
+// someone else's.
+profile('Conflict Band', { type: 'Group', apple: { genre: 'Christian', match: 'conflict', songs: [song('Worship Song')] } });
 
 // Venue habits: one room books punk, one is all over the place, one has too
 // few tagged shows to judge.
@@ -272,6 +288,102 @@ test('synonyms fold sources together, and Apple\'s genre is the last resort', ()
   assert.deepEqual(tagsOf(mixed), ['americana', 'folk']);
 });
 
+test("a tag that only repeats the row's kind is dropped: Classical, DJ night, Dance, Jam, Tribute, Festival", () => {
+  const symphony = item({ title: 'Tacoma Symphony: Brahms 4', genre_tags: 'classical', _lineup: ['Tacoma Symphony'] });
+  assert.deepEqual(displayTags(symphony, factsFor([symphony])), { tags: [], from: null });
+  assert.deepEqual(tagsOf(item({ title: 'Seattle Opera: Tosca', genre_tags: 'Classical, Opera', _lineup: ['Seattle Opera'] })), []);
+  assert.deepEqual(tagsOf(item({ title: 'Emo Night', genre_tags: 'DJ, Emo', _lineup: ['Emo Night'] })), ['emo']);
+  assert.deepEqual(tagsOf(item({ title: 'Salsa Night', category: 'other', genre_tags: 'dance, latin', _lineup: [] })), ['latin']);
+  assert.deepEqual(tagsOf(item({ title: 'Sunday Jazz Jam', genre_tags: 'jam, jazz', _lineup: [] })), ['jazz']);
+  assert.deepEqual(
+    tagsOf(item({ title: 'Thunderstruck: AC/DC Tribute', genre_tags: 'tribute, hard rock', _lineup: ['Thunderstruck'] })),
+    ['hard rock']
+  );
+  assert.deepEqual(
+    tagsOf(item({ title: 'Hopscotch Fest', genre_tags: 'festival, indie rock', _lineup: ['Alpha One', 'Beta Two', 'Gamma Three', 'Delta Four'] })),
+    ['indie rock']
+  );
+  // The venue-habit fallback doesn't echo the kind either.
+  const hall = { ...factsFor([]), venueHabits: new Map([['Symphony Hall', { tags: ['classical', 'opera'] }]]) };
+  const brahms = item({ title: 'Brahms 4', genre_tags: 'classical', venue: 'Symphony Hall', _lineup: ['Nobody Orchestra'] });
+  assert.deepEqual(displayTags(brahms, hall), { tags: [], from: null });
+  const band = item({ title: 'Nobody Known', venue: 'Symphony Hall' });
+  assert.equal(displayTags(band, hall).text, 'usually classical · opera here');
+  // On a plain Music row the same words are genres worth showing.
+  tagged('Quiet Pianist', ['classical', 'ambient']);
+  tagged('Club Act', ['dance', 'synthpop']);
+  assert.deepEqual(tagsOf(item({ title: 'Quiet Pianist' })), ['classical', 'ambient']);
+  assert.deepEqual(tagsOf(item({ title: 'Club Act' })), ['dance', 'synthpop']);
+});
+
+test('one genre spelled two ways shows once, in the first spelling', () => {
+  tagged('Velvet Hours', ['rnb', 'neo soul']);
+  tagged('Neon Coast', ['synthpop', 'new wave']);
+  tagged('Slow Jam Co', ['rhythm and blues', 'neo soul']);
+  tagged('Amen Break', ['drum and bass']);
+  tagged('Juke Joint', ["rock 'n' roll", 'rockabilly']);
+  profile('Slow Jam Co', { apple: { genre: 'R&B/Soul', match: 'mb', songs: [] } });
+  assert.deepEqual(tagsOf(item({ title: 'Velvet Hours', genre_tags: 'R&B' })), ['r&b', 'neo soul']);
+  assert.deepEqual(tagsOf(item({ title: 'Neon Coast', genre_tags: 'Synth-Pop' })), ['synthpop', 'new wave']);
+  assert.deepEqual(tagsOf(item({ title: 'Slow Jam Co' })), ['r&b', 'neo soul']);
+  assert.deepEqual(tagsOf(item({ title: 'Amen Break', genre_tags: 'Drum & Bass' })), ['drum and bass']);
+  assert.deepEqual(tagsOf(item({ title: 'Juke Joint', genre_tags: 'Rock & Roll' })), ['rock and roll', 'rockabilly']);
+  // Your genre weights match whichever way they're spelled.
+  const neon = item({ title: 'Neon Coast' });
+  const f = { ...factsFor([neon]), manualGenres: [{ genre: 'Synth Pop', key: 'synth pop', weight: 4 }] };
+  assert.deepEqual(displayTags(neon, f).tags[0], { tag: 'synthpop', hit: true });
+  const dnb = item({ title: 'Amen Break' });
+  const g = { ...factsFor([dnb]), manualGenres: [{ genre: 'Drum & Bass', key: 'drum & bass', weight: 4 }] };
+  assert.deepEqual(displayTags(dnb, g).tags, [{ tag: 'drum and bass', hit: true }]);
+  // "&" between single letters is an abbreviation, not a list: "r&b" keeps
+  // its name inside a longer genre ("alternative r&b", not "alternative r
+  // and b"), still counts for an R&B weight, and "D&B" is drum and bass.
+  tagged('Alt Soul Singer', ['alternative r&b', 'neo soul']);
+  const alt = item({ title: 'Alt Soul Singer' });
+  const h = { ...factsFor([alt]), manualGenres: [{ genre: 'R&B', key: 'r&b', weight: 4 }] };
+  assert.deepEqual(displayTags(alt, h).tags, [{ tag: 'alternative r&b', hit: true }, { tag: 'neo soul', hit: false }]);
+  assert.deepEqual(tagsOf(item({ title: 'Nobody Known', genre_tags: 'R&B/Hip-Hop' })), ['r&b hip hop']);
+  assert.deepEqual(tagsOf(item({ title: 'Amen Break', genre_tags: 'D&B' })), ['drum and bass']);
+  // A room that books it under both spellings books one genre: half its
+  // shows, though neither spelling alone reaches the 40% a habit needs.
+  for (let i = 0; i < 2; i += 1) show('Synth Room', 'Synth Band', ['synthpop']);
+  for (let i = 0; i < 2; i += 1) show('Synth Room', 'Synth Pop Band', ['synth pop']);
+  for (const tag of ['surf rock', 'jazz', 'metal', 'house']) show('Synth Room', 'Odd Band', [tag]);
+  assert.deepEqual(venueHabits({ today: TODAY }).get('Synth Room'), { tags: ['synthpop'] }, 'the first spelling seen');
+  // One act tagged both ways counts once, under its first spelling too.
+  for (let i = 0; i < 8; i += 1) show('Spelling Room', 'Twin Spelling', ['synth pop', 'synthpop']);
+  assert.deepEqual(venueHabits({ today: TODAY }).get('Spelling Room'), { tags: ['synth pop'] });
+});
+
+test("a row that leads with its act keeps the rest of the title as its program: 'Brahms 4'", () => {
+  const programOf = (fields) => {
+    const it = item(fields);
+    return attachFeel([it], { facts: factsFor([it]) })[0]._feel.program;
+  };
+  assert.equal(programOf({ title: 'Tacoma Symphony: Brahms 4', genre_tags: 'classical', _lineup: ['Tacoma Symphony'] }), 'Brahms 4');
+  assert.equal(programOf({ title: 'SOLD OUT! Seattle Opera – Tosca', genre_tags: 'opera', _lineup: ['Seattle Opera'] }), 'Tosca');
+  assert.equal(
+    programOf({ title: 'Thunderstruck: AC/DC Tribute', genre_tags: 'hard rock', _lineup: ['Thunderstruck'] }),
+    'AC/DC Tribute'
+  );
+  assert.equal(
+    programOf({ title: 'Hopscotch Fest: Alpha One, Beta Two, Gamma Three, Delta Four', _lineup: ['Alpha One', 'Beta Two', 'Gamma Three', 'Delta Four'] }),
+    'Hopscotch Fest'
+  );
+  // A drag show led by its queen says what kind of show it is…
+  assert.equal(programOf({ title: 'Drag Brunch: Aurora Sexton', category: 'other', _lineup: ['Aurora Sexton'] }), 'Drag Brunch');
+  // …unless that only repeats the kind.
+  assert.equal(programOf({ title: 'The Glitter Revue: Burlesque', category: 'other', genre_tags: 'burlesque', _lineup: ['The Glitter Revue'] }), null);
+  // Long programs are cut at a word.
+  const long = programOf({ title: 'Tacoma Symphony: Beethoven, Brahms and the Romantic Symphony Reimagined', genre_tags: 'classical', _lineup: ['Tacoma Symphony'] });
+  assert.ok(long.length <= 40 && long.endsWith('…'), long);
+  // Title-led rows already show the whole title, and a band's tour name is noise.
+  assert.equal(programOf({ title: 'Author Talk: Jess Walter', category: 'other', _lineup: ['Author Talk'] }), null);
+  assert.equal(programOf({ title: 'Hamlet', category: 'other', genre_tags: 'theatre', _lineup: ['Hamlet'] }), null);
+  assert.equal(programOf({ title: "Joyce Manor: I'm People Tour", _lineup: ['Joyce Manor'] }), null);
+  assert.equal(programOf({ title: 'Tacoma Symphony', genre_tags: 'classical', _lineup: ['Tacoma Symphony'] }), null);
+});
+
 test('comedy rows carry no genre tags, even from the artist row', () => {
   assert.deepEqual(tagsOf(item({ title: 'Comic Tagged', category: 'comedy', genre_tags: 'comedy, stand-up' })), []);
   assert.deepEqual(tagsOf(item({ title: 'Joyce Manor', category: 'comedy' })), []);
@@ -339,6 +451,34 @@ test('fansOf: hubs are only demoted once there are 10+ lists', () => {
   assert.deepEqual(fansOf(joyce, { ...f, n: 5 }).map((x) => x.name), ['Big Thief', 'Radiohead', 'Mal Blum']);
 });
 
+test("fansOf: a band named 'X and Y' doesn't borrow the lists one word of its name is on", () => {
+  tagged('Of Monsters and Men', ['indie folk']);
+  tagged('The Men', ['noise rock']);
+  replaceSimilarArtists('parquet courts', 'Parquet Courts', [sim('men', 'The Men', 0.7)]);
+  replaceSimilarArtists('belle', 'Belle', [sim('camera obscura', 'Camera Obscura', 0.7)]);
+  try {
+    const monsters = item({ title: 'Of Monsters and Men' });
+    const feel = attachFeel([monsters], { facts: factsFor([monsters]) })[0]._feel;
+    assert.deepEqual(feel.fans, [], "Parquet Courts' list has The Men on it, not this band");
+    assert.equal(feel.link, null);
+    assert.equal(feel.known.similar, false);
+    // Neither part is an act we know, so neither part's own list speaks for it.
+    const belle = item({ title: 'Belle and Sebastian' });
+    assert.deepEqual(fansOf(belle, factsFor([belle])), []);
+    // A co-bill of two acts we know does borrow a part's list…
+    const cobill = item({ title: 'Joyce Manor & Teen Fears' });
+    const cf = factsFor([cobill]);
+    assert.deepEqual(fansOf(cobill, cf).map((x) => x.name), ['Big Thief', 'Mal Blum', 'Turnover']);
+    assert.equal(attachFeel([cobill], { facts: cf })[0]._feel.known.similar, true);
+    // …and so does a named lead with a backing band.
+    replaceSimilarArtists('dave hause', 'Dave Hause', [sim('chuck ragan', 'Chuck Ragan', 0.8)]);
+    const backed = item({ title: 'Dave Hause & The Mermaid' });
+    assert.deepEqual(fansOf(backed, factsFor([backed])).map((x) => x.name), ['Chuck Ragan']);
+  } finally {
+    db.exec("DELETE FROM similar_artists WHERE seed_key IN ('parquet courts', 'belle', 'dave hause')");
+  }
+});
+
 test("fansOf: without its own list, an act borrows the lists it's on", () => {
   const saints = item({ title: 'Static Saints' });
   const fans = fansOf(saints, factsFor([saints]));
@@ -361,7 +501,9 @@ test('descriptor: a performer-like description, asides removed', () => {
   assert.equal(descriptorOf('Lowercase', all), 'Punk band from Ohio');
   // Not a performer's description: built from MusicBrainz facts instead, or none.
   assert.equal(descriptorOf('Some Actor', all), 'Musician from Chicago, United States');
-  assert.equal(descriptorOf('Some Actor', all, { family: 'comedy' }), 'Comedian from Chicago, United States');
+  // MusicBrainz is a music database: "American actor" doesn't make its
+  // Person a comedian.
+  assert.equal(descriptorOf('Some Actor', all, { family: 'comedy' }), null);
   assert.equal(descriptorOf('No Facts', all), null);
   // Too long for a row.
   assert.equal(descriptorOf('Alvvays', all), 'Band from Toronto, Canada · since 2011');
@@ -397,6 +539,36 @@ test("descriptor: a person's life span isn't a career, and a row wants its own k
   assert.equal(feel.preview, null);
 });
 
+test("descriptor: a stand-up row never takes a namesake musician's MusicBrainz facts, or the notable bonus with them", () => {
+  const names = ['Dana Kole', 'Linked Comic', 'Comic Tagged', 'Wordy Comic'];
+  const all = factsFor(names.map((title) => item({ title })));
+  assert.equal(descriptorOf('Dana Kole', all, { family: 'comedy' }), null);
+  assert.equal(descriptorOf('Linked Comic', all, { family: 'comedy' }), 'Comedian from Dayton, United States');
+  assert.equal(descriptorOf('Comic Tagged', all, { family: 'comedy' }), 'Comedian from Spokane, United States');
+  assert.equal(descriptorOf('Wordy Comic', all, { family: 'comedy' }), 'Comedian from Austin, United States');
+  // On a band's row MusicBrainz's facts still describe the musician.
+  assert.equal(descriptorOf('Dana Kole', all, { family: 'music' }), 'Musician from Dayton, United States');
+
+  // On the row: no descriptor, so pickScore's +3 "notable" stays off.
+  const dana = item({ title: 'Dana Kole', category: 'comedy', genre_tags: 'comedy', _score: 0, source: 'scrape' });
+  attachFeel([dana], { facts: factsFor([dana]) });
+  assert.equal(dana._feel.descriptor, null);
+  assert.equal(dana._feel.preview, null);
+  assert.equal(pickScore(dana), 0);
+  const linked = item({ title: 'Linked Comic', category: 'comedy', genre_tags: 'comedy', _score: 0, source: 'scrape' });
+  attachFeel([linked], { facts: factsFor([linked]) });
+  assert.equal(pickScore(linked), 3, 'a comedian MusicBrainz vouches for is notable');
+});
+
+test('the shared guard: what reads as a comedian for the Wikipedia lookup', () => {
+  assert.equal(describesPerformer('American stand-up comedian (born 1983)', 'comedy'), true);
+  assert.equal(describesPerformer('American comedian, writer and actress (born 1971)', 'comedy'), true);
+  assert.equal(describesPerformer('English singer-songwriter (born 1992)', 'comedy'), false);
+  assert.equal(describesPerformer('American comic book artist', 'comedy'), false);
+  assert.equal(describesPerformer('American film producer', 'comedy'), false);
+  assert.equal(describesPerformer(null, 'comedy'), false);
+});
+
 test('preview: only from a confident Apple match', () => {
   const names = ['PUP', 'Low', 'Joyce Manor', 'Funny Business', 'Comic Person', 'Mal Blum', 'Hannibal Buress'];
   const f = factsFor(names.map((title) => item({ title })));
@@ -412,6 +584,12 @@ test('preview: only from a confident Apple match', () => {
   assert.equal(previewOf('Mal Blum', f, { family: 'music' }), null);
   assert.equal(previewOf('Hannibal Buress', f, { family: 'comedy' }).title, 'Animal Furnace');
   assert.equal(previewOf('Nobody Known', f), null);
+  // A name match MusicBrainz's link disagrees with is never played, and its
+  // genre isn't the row's.
+  const conflict = item({ title: 'Conflict Band' });
+  const cf = factsFor([conflict]);
+  assert.equal(previewOf('Conflict Band', cf), null);
+  assert.deepEqual(displayTags(conflict, cf).tags, []);
 });
 
 // ── The link line and the whole _feel ───────────────────────────────────────
@@ -487,6 +665,7 @@ test('a full show _feel: tags, descriptor, fans, preview and what we know', () =
     ],
     link: { kind: 'fans', text: 'For fans of ♥ Big Thief, Mal Blum' },
     preview: { url: song('Constant Headache').preview, title: 'Constant Headache', artist: 'Joyce Manor' },
+    program: null,
     known: { similar: true, profile: true },
   });
   const saints = item({ title: 'Static Saints' });

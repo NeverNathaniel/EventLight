@@ -15,6 +15,7 @@ const { upsertEvent } = await import('../src/db/queries.js');
 const {
   filmScore,
   pickScore,
+  CANCELLED_PICK,
   chooseDayPicks,
   chooseWeekPicks,
   dayDek,
@@ -22,6 +23,9 @@ const {
   regularsIndex,
   loadCurated,
 } = await import('../src/curation.js');
+const { kindOf } = await import('../src/kinds.js');
+const { filmsByDay, theaterHorizons } = await import('../src/week.js');
+const { addDays } = await import('../src/dates.js');
 
 migrate();
 
@@ -172,15 +176,62 @@ test('filmScore: a run ending at the edge of the posted schedule is not LAST CHA
   assert.equal(scoreOf({ lastDate: D }, { horizonByTheater: new Map() }).flags.length, 0);
 });
 
-test('filmScore: OPENS on a run\'s first date — never on today', () => {
-  const opens = scoreOf({ firstDate: D });
+test('filmScore: OPENS on a run\'s first date, near its release — never on today', () => {
+  const opening = { firstDate: D, release_date: D, peak: 18, upcoming: 18 };
+  const opens = scoreOf(opening);
   assert.equal(opens.score, 5);
   assert.equal(opens.eligible, true);
   assert.deepEqual(opens.flags, [{ key: 'opens', label: 'Opens' }]);
   assert.ok(opens.reasons.some((r) => r.text === 'Opens tonight'));
-  const today = filmScore(runFilm({ firstDate: TODAY, date: TODAY }), { today: TODAY, horizonByTheater });
+  // Thursday previews for a Friday release, and a Sunday opening.
+  assert.equal(scoreOf({ ...opening, release_date: '2030-01-12' }).flags[0]?.key, 'opens');
+  assert.equal(scoreOf({ ...opening, release_date: '2030-01-09' }).flags[0]?.key, 'opens');
+  const today = filmScore(runFilm({ ...opening, firstDate: TODAY, date: TODAY }), { today: TODAY, horizonByTheater });
   assert.deepEqual(today.flags, []);
   assert.equal(today.eligible, false);
+});
+
+test('filmScore: no OPENS without evidence — no release date, a release weeks ago, or showings already gone', () => {
+  // The first listed date alone proves nothing: stored showtimes are only the upcoming ones.
+  assert.deepEqual(scoreOf({ firstDate: D }).flags, []);
+  assert.deepEqual(scoreOf({ firstDate: D, release_date: '2029-12-20' }).flags, [], 'released three weeks ago');
+  assert.deepEqual(scoreOf({ firstDate: D, release_date: '1984-05-19' }).flags, [], 'a repertory title');
+  assert.deepEqual(scoreOf({ firstDate: D, release_date: '2030-01-13' }).flags, [], 'early screenings before release');
+  // Released two days ago and listed from today: showings have dropped off the list, so it's been playing.
+  assert.deepEqual(scoreOf({ firstDate: D, release_date: '2030-01-09', peak: 14, upcoming: 12 }).flags, []);
+});
+
+// The reviewer's cases, through filmsByDay as the day page builds them:
+// Tuesday 6 October 2026 at 7pm, after the evening refresh.
+test('filmScore: a weekend-only run and a run with a gap day don\'t "open" on their next date', () => {
+  const today = '2026-10-06';
+  const now = new Date(2026, 9, 6, 19, 0).getTime();
+  const iso = (date, t) => new Date(`${date}T${t}:00`).toISOString();
+  const days = (from, n) => Array.from({ length: n }, (_, i) => addDays(from, i));
+  const base = { theater: GRAND, city: 'Tacoma', hidden: 0, rating: 'R', mc_score: 86, release_date: '2026-10-02' };
+  const movies = [
+    // Played last Fri–Sun (three showings gone), next on Friday.
+    { ...base, id: 1, title: 'Weekend Run', peak_showings: 9,
+      showtimes: ['2026-10-09', '2026-10-10', '2026-10-11', '2026-10-16', '2026-10-17', '2026-10-18'].map((d) => iso(d, '19:00')) },
+    // A daily matinee whose only showing today was over by the refresh.
+    { ...base, id: 2, title: 'Matinee Run', peak_showings: 14, showtimes: days('2026-10-07', 12).map((d) => iso(d, '13:00')) },
+    // Opened Monday, dark Tuesday: inside the release window, but a showing has dropped off.
+    { ...base, id: 3, title: 'Dark Tuesday', release_date: '2026-10-05', peak_showings: 13,
+      showtimes: days('2026-10-07', 12).map((d) => iso(d, '19:30')) },
+    // Control: a real opening, Thursday previews for a Friday release.
+    { ...base, id: 4, title: 'New Release', release_date: '2026-10-09', peak_showings: 10,
+      showtimes: days('2026-10-08', 10).map((d) => iso(d, '20:00')) },
+  ];
+  const horizon = theaterHorizons(movies);
+  const flagged = [];
+  for (const [date, list] of filmsByDay(today, '2026-10-12', now, movies)) {
+    for (const f of list) {
+      const score = filmScore(f, { today, horizonByTheater: horizon });
+      if (score.flags.some((x) => x.key === 'opens')) flagged.push(`${f.title} ${date}`);
+      if (f.title !== 'New Release') assert.equal(score.eligible, false, `${f.title} ${date} is not a pick`);
+    }
+  }
+  assert.deepEqual(flagged, ['New Release 2026-10-08']);
 });
 
 test('filmScore: restorations get +0.5; Rotten Tomatoes is scaled; the cap is 9', () => {
@@ -204,13 +255,32 @@ test('pickScore: music adds known-act bonuses and a release-show bump, and docks
   assert.equal(pickScore(music(undefined, { _score: 3, title: 'The Fall Farewell Tour' })), 4.5);
 });
 
-test('pickScore: comedy rewards a notable name and a run, docks open mics and nameless showcases, caps at 8', () => {
+test('pickScore: comedy rewards a notable name and a run, docks nameless showcases, caps at 8', () => {
   assert.equal(pickScore(comedy(undefined, { source: 'api' })), 3);
   assert.equal(pickScore(comedy(undefined, { _feel: { tags: [], known: {}, descriptor: 'American stand-up comedian' } })), 3);
   assert.equal(pickScore(comedy(undefined, { source: 'api', _run: { text: 'Thu–Sat' } })), 4);
   assert.equal(pickScore(comedy(undefined, { _score: 4, _lineup: ['A', 'B', 'C', 'D'] })), 1);
   assert.equal(pickScore(comedy(undefined, { _score: 9, source: 'api' })), 8);
   assert.equal(pickScore(comedy(undefined, { _score: 14, source: 'api', _reasons: favorite('Hannibal Buress') })), 17);
+});
+
+test('pickScore: an open mic goes to the back, music or comedy — a notable comedian beats it', () => {
+  // Open mics are night kinds whatever the room; the real kinds, not test stand-ins.
+  const mic = (title, category, fields = {}) =>
+    show('trivia', undefined, { title, kind: category, _kind: kindOf({ title, category }), _lineup: [], ...fields });
+  const songwriters = mic('Songwriter Night', 'music', { _score: 4.5, venue: 'The Valley' });
+  const comedyMic = mic('Comedy Open Mic', 'comedy', { _score: 4.5 });
+  assert.equal(songwriters._kind.family, 'night');
+  assert.equal(comedyMic._kind.domain, 'comedy');
+  assert.equal(pickScore(songwriters), 1.5);
+  assert.equal(pickScore(comedyMic), 1.5);
+  const kumail = comedy(undefined, { _score: 1, _feel: { tags: [], known: {}, descriptor: 'American comedian and actor' } });
+  assert.equal(pickScore(kumail), 4);
+  assert.ok(pickScore(songwriters) < pickScore(kumail));
+  const picks = chooseDayPicks([songwriters, kumail].map((e) => ({ ...e, _pick: pickScore(e) })), at()).picks;
+  assert.deepEqual(ids(picks), [kumail.id]);
+  // Your own act's open-mic slot isn't docked.
+  assert.equal(pickScore(mic('Open Mic Night', 'music', { _score: 12, _reasons: favorite() })), 12);
 });
 
 test('pickScore: films use the film score, stage gets +1, other kinds keep _score', () => {
@@ -229,7 +299,12 @@ test('pickScore: regulars, plans, curated, sold out and cancelled', () => {
   const soldOut = [{ key: 'sold-out', label: 'Sold out' }];
   assert.equal(pickScore(music(undefined, { _score: 10, _flags: soldOut })), 3);
   assert.equal(pickScore(music(undefined, { _score: 10, _flags: soldOut, going: 1 })), 15);
-  assert.equal(pickScore(music(undefined, { _score: 20, _flags: [{ key: 'cancelled', label: 'Cancelled' }] })), -Infinity);
+  const cancelled = pickScore(music(undefined, { _score: 20, _reasons: favorite(), _flags: [{ key: 'cancelled', label: 'Cancelled' }] }));
+  assert.equal(cancelled, CANCELLED_PICK);
+  // It must survive JSON as a number: −Infinity arrives as null, and a list
+  // falling back to _score would star a cancelled favorite.
+  assert.equal(JSON.parse(JSON.stringify({ _pick: cancelled }))._pick, CANCELLED_PICK);
+  assert.ok(CANCELLED_PICK < 0);
 });
 
 test('a favorite (12 or more) always outranks any film (9 at most)', () => {
@@ -332,6 +407,21 @@ test('day picks: on today, shows that started over an hour ago are left out — 
   assert.ok(ids(ahead.picks).includes(started.id));
 });
 
+test('day picks: when tonight\'s best has started and nothing else is worth it, the label and the sentence say so', () => {
+  const late = new Date(2030, 0, 11, 21, 5).getTime();
+  const fav = music(undefined, { time: '20:00', _score: 14, _reasons: favorite() });
+  const quiet = music(1, { time: '22:00' });
+  const tonight = chooseDayPicks([fav, quiet], { now: late, today: D, date: D });
+  assert.deepEqual(tonight, { picks: [], label: 'started' });
+  const counts2 = { total: 2, regulars: 0 };
+  assert.equal(dayDek(tonight.picks, { counts: counts2, label: tonight.label }), 'Tonight’s best has already started.');
+  // Before it starts, it's the pick; a night that never had anything good is still "nothing close".
+  assert.deepEqual(ids(chooseDayPicks([fav, quiet], { now: MORNING, today: D, date: D }).picks), [fav.id]);
+  const dull = chooseDayPicks([music(1, { time: '19:00' }), quiet], { now: late, today: D, date: D });
+  assert.equal(dull.label, 'none');
+  assert.equal(dayDek(dull.picks, { counts: counts2, label: dull.label }), 'Nothing close to your taste. Everything on is below.');
+});
+
 test('day picks: the floor applies after the penalties, so a weak item is never forced in', () => {
   const a = music(12, { venue: 'Neumos', tags: ['punk'] });
   const weak = music(4, { venue: 'Neumos', tags: ['punk'] });
@@ -367,6 +457,25 @@ test('week tickets: Going first, then best first — two a night, each act once,
   assert.equal(picks.filter((p) => p.kind === 'film').length, 1);
   assert.equal(picks.filter((p) => p._kind.family === 'comedy').length, 2);
   assert.deepEqual(ids(chooseWeekPicks(all, { max: 3, pickMin: 8 })), [plan.id, pupSat.id, fri1.id]);
+});
+
+test('week tickets: tonight\'s shows that started over an hour ago are left out, as on the day page; plans stay', () => {
+  const tonight = (pick, fields) => music(pick, { date: D, time: '20:00', ...fields });
+  const laura = tonight(14, { headliner_key: 'laura stevenson' });
+  const wetLeg = tonight(12, { headliner_key: 'wet leg' });
+  const tomorrow = music(10, { date: '2030-01-12' });
+  const all = [laura, wetLeg, tomorrow];
+  const when = (h, m = 0) => ({ now: new Date(2030, 0, 11, h, m).getTime(), today: D, max: 8, pickMin: 8 });
+  assert.deepEqual(ids(chooseWeekPicks(all, when(19))), [laura.id, wetLeg.id, tomorrow.id]);
+  assert.deepEqual(ids(chooseWeekPicks(all, when(21, 5))), [tomorrow.id]);
+  // The same week seen from the day before: nothing has started.
+  assert.equal(chooseWeekPicks(all, { ...when(21, 5), today: TODAY }).length, 3);
+  // Your plan for tonight stays on the tickets after it starts.
+  const plan = tonight(2, { going: 1, interested: 1 });
+  assert.deepEqual(ids(chooseWeekPicks([plan, ...all], when(23))), [plan.id, tomorrow.id]);
+  // And the day's own sentence agrees that the night's best has started.
+  const day = chooseDayPicks([laura, wetLeg], { now: when(21, 5).now, today: D, date: D });
+  assert.equal(day.label, 'started');
 });
 
 // ── dayDek ──────────────────────────────────────────────────────────────────
@@ -466,6 +575,11 @@ test('week note: the best night and the quiet ones', () => {
   assert.equal(weekNote(days.slice(2)).text, 'Best night: Friday (PUP).');
   assert.equal(weekNote(days.slice(0, 2)), null);
   assert.equal(weekNote([]), null);
+  // Tonight's favorite started an hour ago: no picks left, but not a quiet night.
+  const started = [{ date: '2030-01-08', picks: [], picksLabel: 'started' }, ...days.slice(2)];
+  assert.deepEqual(weekNote(started).quiet, []);
+  assert.equal(weekNote(started).text, 'Best night: Friday (PUP).');
+  assert.deepEqual(weekNote([{ date: '2030-01-08', picks: [], picksLabel: 'none' }, ...days.slice(2)]).quiet, ['2030-01-08']);
 });
 
 // ── regularsIndex ───────────────────────────────────────────────────────────
@@ -493,6 +607,20 @@ const hamlet = add('Hamlet', 'Tacoma Little Theatre', [
 ]);
 const tooOld = add('Quiz Night', 'The Valley', ['2029-10-04', '2029-10-11', '2029-10-18']);
 
+// Twice a week, nightly, and a host who changes every week — six weeks of
+// listings around Thursday 10 January (Tuesday the 8th, Wednesday the 9th).
+const weeks = [-3, -2, -1, 0, 1, 2];
+const tueThu = weeks.flatMap((w) => [addDays('2030-01-08', 7 * w), addDays('2030-01-10', 7 * w)]);
+const karaokeTwice = add('Karaoke Night', 'Magnolia Bar', tueThu);
+const jamTwice = add('Bluegrass Jam', 'Old Town Spar', tueThu, { category: 'music' });
+const weeklyJam = add('Weekly Bluegrass Jam', 'Rhein Haus Annex', tueThu, { category: 'music' });
+const happyHour = add('Happy Hour Jazz', 'Jazzbones', Array.from({ length: 26 }, (_, i) => addDays(R_TODAY, i - 6)), { category: 'music' });
+const hosts = ['Jen Ray', 'Sam Lee', 'Bo Diaz', 'Kat Wu', 'Al Moss', 'Ty Fox'];
+const micNights = weeks.map((w, i) => add(`Comedy Open Mic hosted by ${hosts[i]}`, 'Laughs Annex', [addDays('2030-01-09', 7 * w)], { category: 'comedy' })[0]);
+const showcase = add('Weekend Showcase', 'Laughs Annex', weeks.flatMap((w) => [addDays('2030-01-11', 7 * w), addDays('2030-01-12', 7 * w)]), { category: 'comedy' });
+// A play Thursday to Sunday for four weeks is a run, not a regular.
+const ourTown = add('Our Town', 'Lakewood Playhouse', [0, 1, 2, 3].flatMap((w) => [0, 1, 2, 3].map((d) => addDays('2030-01-03', 7 * w + d))), { genre_tags: 'Theatre' });
+
 test('regulars: four Thursdays → "Every Thu"; fortnightly → "Every other Thu"; monthly', () => {
   const { regular } = regularsIndex(R_TODAY);
   assert.deepEqual(regular.get(songbook[3]), { series: 'spar|northwest songbook', cadence: 'Every Thu' });
@@ -515,6 +643,36 @@ test('regulars: a comic\'s Thursday-to-Saturday is a run, not a regular', () => 
   }
   assert.equal(run.get(hamlet[5]).text, 'Until Jan 20');
   assert.equal(run.get(songbook[0]), undefined);
+});
+
+test('regulars: twice-weekly nights are regulars, never "Tue–Thu" runs; a nightly set is "Every night"', () => {
+  const { regular, run } = regularsIndex(R_TODAY);
+  for (const [name, list] of [['karaoke', karaokeTwice], ['jam', jamTwice], ['weekly jam', weeklyJam]]) {
+    for (const id of list) {
+      assert.equal(regular.get(id)?.cadence, 'Every Tue & Thu', name);
+      assert.equal(run.get(id), undefined, name);
+    }
+  }
+  for (const id of happyHour) {
+    assert.equal(regular.get(id)?.cadence, 'Every night');
+    assert.equal(run.get(id), undefined, 'not a run "until" the end of the listings');
+  }
+  for (const id of showcase) assert.equal(regular.get(id)?.cadence, 'Every Fri & Sat');
+});
+
+test('regulars: a night whose host changes every week is still one series', () => {
+  const { regular } = regularsIndex(R_TODAY);
+  const series = new Set(micNights.map((id) => regular.get(id)?.series));
+  assert.deepEqual([...series], ['laughs annex|comedy open mic']);
+  assert.equal(regular.get(micNights[0]).cadence, 'Every Wed');
+});
+
+test('regulars: a play Thursday to Sunday for a month is a run to its last night', () => {
+  const { regular, run } = regularsIndex(R_TODAY);
+  for (const id of ourTown) {
+    assert.equal(regular.get(id), undefined);
+    assert.equal(run.get(id)?.text, 'Until Jan 27');
+  }
 });
 
 test('regulars: the same title at two venues is two series', () => {

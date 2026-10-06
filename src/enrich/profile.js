@@ -24,6 +24,7 @@ import { lookupArtist } from './musicbrainz.js';
 import { similarArtists } from './listenbrainz.js';
 import { mbTurn, wikiTurn, itunesTurn, foreground, promote } from './limits.js';
 import { getArtist, getArtistProfile, saveArtistProfile, getSimilarFor } from '../db/artists.js';
+import { describesPerformer } from '../feel.js';
 
 const MB_URL = 'https://musicbrainz.org/ws/2/artist';
 const ITUNES_URL = 'https://itunes.apple.com';
@@ -73,13 +74,6 @@ export function parseMusicBrainz(a) {
     },
   };
 }
-
-// A short description that reads like a performer's: "Canadian punk rock
-// band", "American stand-up comedian". The same words as the row's
-// descriptor guard (DESCRIPTOR_RE in src/feel.js); "1984 film" or "American
-// actor" is more likely someone else with the same name.
-export const PERFORMER_RE =
-  /\b(?:band|musician|singer|rapper|songwriter|duo|trio|group|dj|producer|composer|ensemble|orchestra|comedian|comic|humorist|podcaster|quartet|quintet|collective|artist)s?\b/i;
 
 // A Wikipedia page summary → bio and photo. Disambiguation pages don't count.
 export function parseWikiSummary(d) {
@@ -177,22 +171,34 @@ async function fetchMusicBrainz(name, mbid, job = {}) {
 
 // Wikipedia by name, for a comedian MusicBrainz doesn't know or doesn't
 // link: "Name", then "Name (comedian)". Only a standard article whose short
-// description reads like a performer's counts, so "Hannibal Buress" gets
-// "American stand-up comedian" and a namesake (a film, a footballer) is
-// turned away. Bands aren't looked up this way: a band MusicBrainz doesn't
-// know is usually a local act, and a Wikipedia page under its name is more
-// likely another band's. `summary` fetches one page's summary.
+// description reads like a comedian's counts — the same guard the row's
+// descriptor uses (src/feel.js), so the sheet and the row agree — so
+// "Hannibal Buress" gets "American stand-up comedian", and a namesake (a
+// singer-songwriter, a comic book artist, a film producer, a footballer) is
+// passed over for "Name (comedian)". Bands aren't looked up this way: a band
+// MusicBrainz doesn't know is usually a local act, and a Wikipedia page under
+// its name is more likely another band's. `summary` fetches one page's
+// summary.
 export async function wikipediaByName(name, hint, summary) {
   const base = String(name || '').trim();
   if (!base || hint !== 'comedy') return null;
   for (const title of [base, `${base} (comedian)`]) {
     const page = parseWikiSummary(await summary(title));
-    if (page && PERFORMER_RE.test(page.description || '')) return page;
+    if (page && describesPerformer(page.description, 'comedy')) return page;
   }
   return null;
 }
 
+// Whether fetchWikipedia would ask Wikimedia anything for this act: with a
+// page or Wikidata id MusicBrainz links, or by name for a comedian. The
+// prefetch's breaker reads it too, so pausing Wikipedia doesn't mark a
+// profile that never needed it as failing it.
+export function wikipediaWouldAsk(mb, name, hint) {
+  return Boolean(mb?.wikipediaTitle || mb?.wikidataId || (hint === 'comedy' && String(mb?.name || name || '').trim()));
+}
+
 async function fetchWikipedia(mb, name, job = {}) {
+  if (!wikipediaWouldAsk(mb, name, job.hint)) return null;
   const summary = (title) =>
     getJSON(`${WIKI_SUMMARY_URL}/${encodeURIComponent(title.replace(/ /g, '_'))}`, null, via(wikiTurn, job));
   let title = mb?.wikipediaTitle;
@@ -209,12 +215,29 @@ async function fetchWikipedia(mb, name, job = {}) {
   return wikipediaByName(mb?.name || name, job.hint, summary);
 }
 
+// The Apple artist MusicBrainz links to, looked up by id.
+async function appleById(name, appleId, itunes) {
+  const linked = pickAppleArtist(name, (await getJSON(`${ITUNES_URL}/lookup`, { id: appleId, country: 'US' }, itunes))?.results, appleId);
+  return linked && String(linked.artistId) === String(appleId) ? linked : null;
+}
+
 async function fetchApple(name, appleId, job = {}) {
   const itunes = via(itunesTurn, job);
   const found = await getJSON(`${ITUNES_URL}/search`, { term: name, entity: 'musicArtist', limit: 10, country: 'US' }, itunes);
   let artist = pickAppleArtist(name, found?.results, appleId);
-  if (!artist && appleId) {
-    artist = pickAppleArtist(name, (await getJSON(`${ITUNES_URL}/lookup`, { id: appleId, country: 'US' }, itunes))?.results, appleId);
+  // "mb": the artist MusicBrainz links to, so surely them. "name": the first
+  // exact name match, which can be a namesake — rows only play its songs
+  // when the name is distinctive enough (src/feel.js). "conflict": a name
+  // match MusicBrainz's link says is someone else, kept for the sheet but
+  // never played or trusted on a row.
+  let match = 'name';
+  if (appleId && String(artist?.artistId) === String(appleId)) match = 'mb';
+  else if (appleId) {
+    // The search left the linked artist out (it only ranks the top ten), so
+    // ask for them by id rather than settle for a same-name stranger.
+    const linked = await appleById(name, appleId, itunes);
+    if (linked) [artist, match] = [linked, 'mb'];
+    else if (artist) match = 'conflict';
   }
   if (!artist) return null;
   // The song search ranks by popularity; looking up by artist id doesn't, so
@@ -227,10 +250,6 @@ async function fetchApple(name, appleId, job = {}) {
     const more = await getJSON(`${ITUNES_URL}/lookup`, { id: artist.artistId, entity: 'song', limit: 25, country: 'US' }, itunes);
     songs = topSongs([...(search?.results || []), ...(more?.results || [])], artist.artistId);
   }
-  // "mb": the artist MusicBrainz links to, so surely them. "name": the first
-  // exact name match, which can be a namesake — rows only play its songs
-  // when the name is distinctive enough (src/feel.js).
-  const match = appleId && String(artist.artistId) === String(appleId) ? 'mb' : 'name';
   return { url: cleanAppleUrl(artist.artistLinkUrl), genre: artist.primaryGenreName || null, match, songs };
 }
 
@@ -263,6 +282,9 @@ async function buildProfile(name, key, sources, job) {
   if (apple.status === 'rejected') failed.push('Apple Music');
   const w = wiki.value || null;
   const a = apple.value || null;
+  // Album art stands in for a photo, but not a namesake's: when MusicBrainz
+  // links a different Apple artist ('conflict'), it's likely someone else's.
+  const artwork = a?.match === 'conflict' ? null : a?.songs?.[0]?.artwork;
 
   const data = {
     name: mb?.name || name,
@@ -272,7 +294,7 @@ async function buildProfile(name, key, sources, job) {
     until: mb?.until || null,
     description: w?.description || mb?.description || null,
     bio: w?.bio || null,
-    image: w?.image || a?.songs?.[0]?.artwork || null,
+    image: w?.image || artwork || null,
     wikipedia_url: w?.url || null,
     apple: a,
     links: mb?.links || {},

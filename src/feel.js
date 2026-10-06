@@ -1,7 +1,8 @@
 // What a show is, before you tap it: a row's genre line, who the act is
 // ("Canadian punk rock band"), who they're for ("For fans of Joyce Manor,
-// Jeff Rosenstock"), the one line that says why it's for you, and a song to
-// play when we're sure it's the right artist.
+// Jeff Rosenstock"), the one line that says why it's for you, a song to play
+// when we're sure it's the right artist, and the program a concert's
+// headline leaves out ("Brahms 4").
 //
 // Everything here reads SQLite only — the artist lookups that fill those
 // tables run in the background (src/enrich/prefetch.js) or when someone opens
@@ -17,7 +18,7 @@ import db from './db/index.js';
 import { lineupTags, parseLineupColumn, similarArtistsVersion } from './db/artists.js';
 import { buildContext, normTag, tagMatch } from './scoring/engine.js';
 import { artistKey, lineupKeys, isTribute } from './lineup.js';
-import { kindOf, usesTitle } from './kinds.js';
+import { kindOf, usesTitle, cleanTitle } from './kinds.js';
 import { todayISO, addDays } from './dates.js';
 
 const CHUNK = 500;
@@ -30,6 +31,7 @@ const MAX_TAG_LENGTH = 22;
 const ARTIST_TAGS = 6;
 const MAX_FAN_NAME = 22;
 const MAX_DESCRIPTOR = 48;
+const MAX_PROGRAM = 40;
 const HABIT_DAYS = 120;
 const HABIT_MIN_SHOWS = 8;
 const HABIT_TOP_SHARE = 0.4;
@@ -42,9 +44,31 @@ const GENERIC_TAGS = new Set(['music', 'other', 'live music', 'concert', 'concer
 // Tags that only repeat the kind tag beside them ("STAND-UP · comedy").
 const KIND_ECHOES = new Set([
   'comedy', 'stand up', 'standup', 'stand up comedy', 'comedian', 'improv', 'open mic', 'film', 'films',
-  'movie', 'movies', 'theatre', 'theater', 'arts & theatre', 'other', 'undefined', 'live', 'drag', 'trivia',
+  'movie', 'movies', 'theatre', 'theater', 'arts and theatre', 'other', 'undefined', 'live', 'drag', 'trivia',
   'karaoke', 'burlesque', 'miscellaneous',
 ]);
+// Tags that repeat one kind's tag ("CLASSICAL · classical", "DJ NIGHT · dj"),
+// dropped on that kind's rows only: on a Music row a pianist's "classical" or
+// a club act's "dance" is a genre worth showing. A tag that is the kind's own
+// name ("dj night", "open mic") counts too (echoesKind).
+const KIND_TAG_ECHOES = new Map(
+  Object.entries({
+    classical: ['classical', 'classical music', 'symphony', 'symphonic', 'orchestra', 'orchestral', 'opera', 'chamber music'],
+    festival: ['festival', 'festivals', 'music festival', 'fest'],
+    tribute: ['tribute', 'tributes', 'tribute band', 'tribute act', 'cover band', 'covers'],
+    dj: ['dj', 'djs', 'dj set', 'dance party'],
+    dance: ['dance', 'dancing', 'social dance'],
+    jam: ['jam', 'jams', 'jam session'],
+    cabaret: ['variety', 'vaudeville', 'circus'],
+    podcast: ['podcasts'],
+    talk: ['talks', 'lecture', 'lectures'],
+    market: ['markets'],
+    class: ['classes', 'workshop', 'workshops'],
+  }).map(([kind, tags]) => [kind, new Set(tags)])
+);
+// Kinds whose title says what the night is when the row leads with its act
+// ("Tacoma Symphony: Brahms 4"), besides the stage family (programOf).
+const PROGRAM_KINDS = new Set(['classical', 'festival', 'tribute']);
 // Where an act is from isn't what it sounds like.
 const PLACE_TAGS = new Set([
   'american', 'british', 'english', 'canadian', 'australian', 'irish', 'scottish', 'welsh', 'french', 'german',
@@ -64,13 +88,22 @@ const COARSE = new Set([
   'soul', 'blues', 'experimental',
 ]);
 // Different sources' names for the same thing (Apple's "Hip-Hop/Rap",
-// Ticketmaster's "Dance/Electronic").
+// Ticketmaster's "Dance/Electronic"), after canonTag has spelled "&" as
+// "and" (but kept "r&b", "d&b") and dropped apostrophes.
 const SYNONYMS = new Map([
   ['hip hop rap', 'hip hop'],
   ['hiphop', 'hip hop'],
   ['dance electronic', 'electronic'],
   ['electronica', 'electronic'],
   ['r&b soul', 'r&b'],
+  ['rnb', 'r&b'],
+  ['rhythm and blues', 'r&b'],
+  ['rock n roll', 'rock and roll'],
+  ['rocknroll', 'rock and roll'],
+  ['drum n bass', 'drum and bass'],
+  ['drumnbass', 'drum and bass'],
+  ['dnb', 'drum and bass'],
+  ['d&b', 'drum and bass'],
 ]);
 // normTag takes the hyphens out for matching; these read better with them.
 const DISPLAY = new Map([
@@ -127,11 +160,28 @@ function splitList(text) {
     .filter(Boolean);
 }
 
-// A tag's matching key: normalised, synonyms folded, and dropped (null) when
-// it isn't a genre worth showing.
+// One spelling for one genre: normTag's lower case and spaces, "&" as "and"
+// ("drum & bass" is "drum and bass"), no apostrophes ("rock 'n' roll"), and
+// synonyms folded ("rnb", "R&B/Soul" → "r&b"). Between single letters "&" is
+// an abbreviation, not a list, so "r&b" keeps its name inside a longer genre
+// ("alternative r&b", which an R&B weight still covers).
+function canonTag(raw) {
+  const key = normTag(raw)
+    .replace(/['’‘`]/g, '')
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/(^| )([a-z]) and ([a-z])(?= |$)/g, '$1$2&$3');
+  return SYNONYMS.get(key) || key;
+}
+
+// Spaces left out, so "synthpop" and "synth pop" are the same genre.
+const compact = (key) => key.replace(/ /g, '');
+
+// A tag's matching key: canonical, and dropped (null) when it isn't a genre
+// worth showing.
 function tagKey(raw) {
-  let key = normTag(raw);
-  key = SYNONYMS.get(key) || key;
+  const key = canonTag(raw);
   if (!key || key.length > MAX_TAG_LENGTH) return null;
   if (GENERIC_TAGS.has(key) || KIND_ECHOES.has(key) || PLACE_TAGS.has(key) || NOT_GENRES.has(key)) return null;
   if (DECADE_RE.test(key)) return null;
@@ -140,16 +190,25 @@ function tagKey(raw) {
 
 const displayTag = (key) => DISPLAY.get(key) || key;
 
-// tagMatch() builds a RegExp per call, and a week of rows checks every tag
-// against every genre weight; the tag vocabulary is small, so remember the
-// answers.
+// Whether a tag only repeats the row's kind: "classical" on a Classical row,
+// "dj night" on a DJ night.
+function echoesKind(key, kind) {
+  if (!kind) return false;
+  return key === canonTag(kind.label) || key === canonTag(kind.key) || Boolean(KIND_TAG_ECHOES.get(kind.key)?.has(key));
+}
+
+// Whether `key` is `tag` or a broader form of it ("punk" covers "pop
+// punk"), both canonical (canonTag); "synth pop" and "synthpop" cover each
+// other. tagMatch() builds a RegExp per call, and a week of rows checks every
+// tag against every genre weight; the tag vocabulary is small, so remember
+// the answers.
 const matchCache = new Map();
 function covers(key, tag) {
   const k = `${key}\n${tag}`;
   let hit = matchCache.get(k);
   if (hit === undefined) {
     if (matchCache.size >= 50000) matchCache.clear();
-    hit = tagMatch(key, tag) > 0;
+    hit = tagMatch(key, tag) > 0 || compact(key) === compact(tag);
     matchCache.set(k, hit);
   }
   return hit;
@@ -187,6 +246,22 @@ function parseJSON(text) {
   }
 }
 
+// The keys whose similar lists speak for an act: its whole name, and parts
+// of it only where lineupTags() (src/db/artists.js) trusts them — the lead of
+// "Dave Hause & The Mermaid", or a co-bill whose every act MusicBrainz knows
+// ("Joyce Manor & Teen Fears"). Otherwise "Of Monsters and Men" would borrow
+// the lists The Men are on.
+function similarKeys(name, isFound) {
+  const [whole, ...parts] = lineupKeys(name);
+  const keys = [whole];
+  const backed = String(name || '').match(/^(.+?)\s+(?:&|and)\s+the\s+\S/i);
+  if (backed && backed[1].trim().split(/\s+/).length >= 2) keys.push(artistKey(backed[1]));
+  if (parts.length >= 2 && parts.every(isFound)) keys.push(...parts);
+  return [...new Set(keys.filter(Boolean))];
+}
+
+const foundIn = (artists) => (key) => artists.get(key)?.status === 'found';
+
 // ── Facts ───────────────────────────────────────────────────────────────────
 
 // How many similar lists each artist is on, and which artists sit on a
@@ -214,15 +289,13 @@ function listStats(favorites) {
 // `today` only moves the venue-habit window (tests pin it).
 export function loadFacts(items, ctx = buildContext(), { today = todayISO() } = {}) {
   const actKeys = new Set();
-  const headKeys = new Set();
+  const heads = new Set();
   const profileKeys = new Set();
   for (const item of items || []) {
     if (item.kind === 'film') continue;
     lineupOf(item).forEach((name, slot) => {
-      for (const key of lineupKeys(name)) {
-        actKeys.add(key);
-        if (slot === 0) headKeys.add(key);
-      }
+      for (const key of lineupKeys(name)) actKeys.add(key);
+      if (slot === 0) heads.add(name);
       const key = artistKey(name);
       if (key) profileKeys.add(key);
     });
@@ -232,6 +305,8 @@ export function loadFacts(items, ctx = buildContext(), { today = todayISO() } = 
   for (const r of selectIn('SELECT artist_key, status, tags FROM artists WHERE artist_key IN (?)', actKeys)) {
     artists.set(r.artist_key, { status: r.status, tags: splitList(r.tags) });
   }
+  const isFound = foundIn(artists);
+  const headKeys = new Set([...heads].flatMap((name) => similarKeys(name, isFound)));
 
   const similarBySeed = new Map();
   const bySeed = selectIn(
@@ -346,7 +421,7 @@ function isHit(key, manualGenres) {
   }
   let hit = map.get(key);
   if (hit === undefined) {
-    hit = manualGenres.some((g) => covers(SYNONYMS.get(g.key) || g.key, key));
+    hit = manualGenres.some((g) => covers(canonTag(g.key), key));
     map.set(key, hit);
   }
   return hit;
@@ -384,7 +459,8 @@ function chooseTags(candidates, manualGenres) {
 
 // The headliner's own tags and Apple genre only when the headliner is the
 // act; a title-led night keeps its source tags ("Sunday Jazz Jam" → jazz).
-function tagCandidates(item, facts, performer) {
+// One genre spelled two ways counts once, in the first spelling.
+function tagCandidates(item, facts, performer, kind) {
   const head = performer ? lineupOf(item)[0] : null;
   const raw = [];
   if (head) for (const t of lineupTags(head, tagsByKey(facts)).slice(0, ARTIST_TAGS)) raw.push([t, 'artist']);
@@ -396,8 +472,8 @@ function tagCandidates(item, facts, performer) {
   const out = [];
   for (const [t, from] of raw) {
     const key = tagKey(t);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    if (!key || echoesKind(key, kind) || seen.has(compact(key))) continue;
+    seen.add(compact(key));
     out.push({ key, from });
   }
   return out;
@@ -413,14 +489,14 @@ export function displayTags(item, facts) {
   // A comedian's source tag is just "comedy"; a film's line is built apart.
   if (kind.family === 'comedy' || kind.family === 'film' || item.kind === 'film') return { tags: [], from: null };
   const lineup = lineupOf(item);
-  const chosen = chooseTags(tagCandidates(item, facts, hasPerformer(item, kind, lineup)), facts.manualGenres);
+  const chosen = chooseTags(tagCandidates(item, facts, hasPerformer(item, kind, lineup), kind), facts.manualGenres);
   if (chosen.length) {
     const from = ORIGINS.find((o) => chosen.some((x) => x.from === o));
     return { tags: chosen.map(({ tag, hit }) => ({ tag, hit })), from };
   }
   if (!musicLike(kind)) return { tags: [], from: null };
-  const habit = facts.venueHabits?.get(item.venue);
-  if (habit?.tags.length) return { tags: [], from: 'venue', text: `usually ${habit.tags.join(' · ')} here` };
+  const habit = facts.venueHabits?.get(item.venue)?.tags.filter((t) => !echoesKind(canonTag(t), kind));
+  if (habit?.length) return { tags: [], from: 'venue', text: `usually ${habit.join(' · ')} here` };
   if (lineup.length >= 2) return { tags: [], from: 'bill', text: `local bill · ${lineup.length} acts` };
   return { tags: [], from: null };
 }
@@ -461,26 +537,37 @@ export function venueHabits({ today = todayISO() } = {}) {
     if (!head) continue;
     const kind = kindOf({ ...r, _lineup: lineup }, { headlinerFound: found.has(artistKey(head)) });
     if (!musicLike(kind) || !hasPerformer(r, kind, lineup)) continue;
-    const keys = [...new Set(lineupTags(head, tags).map(tagKey).filter(Boolean))].slice(0, MAX_TAGS);
+    // An act tagged both "synth pop" and "synthpop" has one genre, under the
+    // first spelling.
+    const keys = lineupTags(head, tags)
+      .map(tagKey)
+      .filter((k, i, all) => k && all.findIndex((x) => x && compact(x) === compact(k)) === i)
+      .slice(0, MAX_TAGS);
     if (!keys.length) continue;
     const vk = artistKey(r.venue);
-    if (!venues.has(vk)) venues.set(vk, { names: new Set(), shows: new Set(), counts: new Map() });
+    if (!venues.has(vk)) venues.set(vk, { names: new Set(), shows: new Set(), counts: new Map(), spelling: new Map() });
     const v = venues.get(vk);
     v.names.add(r.venue);
     // The same show listed by two sources counts once.
     const show = `${r.date}|${artistKey(head)}`;
     if (v.shows.has(show)) continue;
     v.shows.add(show);
-    for (const k of keys) v.counts.set(k, (v.counts.get(k) || 0) + 1);
+    // One genre's spellings ("synthpop", "synth pop") count together, under
+    // the first one seen.
+    for (const k of keys) {
+      const c = compact(k);
+      if (!v.spelling.has(c)) v.spelling.set(c, k);
+      v.counts.set(c, (v.counts.get(c) || 0) + 1);
+    }
   }
 
   const out = new Map();
   for (const v of venues.values()) {
     const total = v.shows.size;
     if (total < HABIT_MIN_SHOWS) continue;
-    const ranked = [...v.counts].sort(
-      (a, b) => b[1] - a[1] || COARSE.has(a[0]) - COARSE.has(b[0]) || a[0].localeCompare(b[0])
-    );
+    const ranked = [...v.counts]
+      .map(([c, n]) => [v.spelling.get(c), n])
+      .sort((a, b) => b[1] - a[1] || COARSE.has(a[0]) - COARSE.has(b[0]) || a[0].localeCompare(b[0]));
     const [top, topCount] = ranked[0];
     if (topCount / total < HABIT_TOP_SHARE) continue;
     const second = ranked.find(([k, n]) => k !== top && n / total >= HABIT_SECOND_SHARE && !overlaps(k, top));
@@ -495,7 +582,7 @@ export function venueHabits({ today = todayISO() } = {}) {
 
 // The headliner's own ListenBrainz list, or else the lists it appears on.
 function similarPool(name, facts) {
-  const keys = lineupKeys(name);
+  const keys = similarKeys(name, foundIn(facts.artists));
   for (const key of keys) {
     const own = facts.similarBySeed.get(key);
     if (own?.length) return own.map((r) => ({ key: r.artist_key, name: r.name, score: r.score }));
@@ -511,7 +598,7 @@ function similarPool(name, facts) {
 }
 
 function hasOwnList(name, facts) {
-  return lineupKeys(name).some((key) => facts.similarBySeed.get(key)?.length > 0);
+  return similarKeys(name, foundIn(facts.artists)).some((key) => facts.similarBySeed.get(key)?.length > 0);
 }
 
 // Artists on nearly every list (the Radioheads) say little about this one.
@@ -565,6 +652,14 @@ function readsAsPerformer(d, family) {
   return DESCRIPTOR_RE.test(words);
 }
 
+// Whether a description (asides and all) reads like this kind of act's. The
+// artist lookup (src/enrich/profile.js) uses it to accept a comedian's
+// Wikipedia page found by name, so the sheet and the row can't disagree.
+export function describesPerformer(text, family) {
+  const d = trimDescription(text);
+  return Boolean(d) && readsAsPerformer(d, family);
+}
+
 // A cached description, if it reads like this act's and fits a row.
 function performerDescription(text, family) {
   const d = trimDescription(text);
@@ -574,11 +669,18 @@ function performerDescription(text, family) {
 
 const BUILT_NOUN = { Group: 'Band', Person: 'Musician', Orchestra: 'Orchestra', Choir: 'Choir' };
 
+// Whether MusicBrainz's record for this name is a comedian's: it links to an
+// Apple comedy artist, or it's tagged as comedy.
+function comedyRecord(p, tags) {
+  return (p.apple?.match === 'mb' && p.apple.genre === 'Comedy') || tags.some((t) => COMEDIAN_RE.test(t));
+}
+
 // Who an act is, in a few words: "Canadian punk rock band", or built from
 // MusicBrainz's facts ("Band from Toronto, Canada · since 2011"). A person in
 // the comedy family is a comedian, not a musician. null when we can't say.
 export function descriptorOf(name, facts, { family } = {}) {
-  const p = facts.profiles.get(artistKey(name));
+  const key = artistKey(name);
+  const p = facts.profiles.get(key);
   if (!p) return null;
   const described = performerDescription(p.description, family);
   if (described) return described;
@@ -589,7 +691,15 @@ export function descriptorOf(name, facts, { family } = {}) {
   if (family && d && !readsAsPerformer(d, family) && readsAsPerformer(d)) return null;
   if (!p.from) return null;
   let noun = BUILT_NOUN[p.type];
-  if (family === 'comedy') noun = p.type === 'Person' ? 'Comedian' : null;
+  // MusicBrainz is a music database, so its Person is a stand-up only when
+  // something says this record is a comedian: a description that does (too
+  // long for the row), a linked Apple comedy artist, or comedy tags.
+  // Otherwise a namesake musician makes a local comic "Comedian from Dayton"
+  // (and notable, to pickScore).
+  if (family === 'comedy') {
+    const comedian = (d && readsAsPerformer(d, 'comedy')) || comedyRecord(p, facts.artists.get(key)?.tags || []);
+    noun = p.type === 'Person' && comedian ? 'Comedian' : null;
+  }
   if (!noun) return null;
   // A person's MusicBrainz life span is their birth (and death), not a career.
   let span = '';
@@ -599,9 +709,11 @@ export function descriptorOf(name, facts, { family } = {}) {
 }
 
 // The Apple artist is ours if MusicBrainz linked it, or the name is too
-// distinctive to collide (two words, or nine letters: not "PUP" or "Low").
+// distinctive to collide (two words, or nine letters: not "PUP" or "Low") —
+// unless MusicBrainz links a different Apple artist ('conflict').
 function appleNameSure(profile) {
   if (profile.apple?.match === 'mb') return true;
+  if (profile.apple?.match === 'conflict') return false;
   const key = artistKey(profile.name || '');
   return key.split(' ').length >= 2 || key.length >= 9;
 }
@@ -663,6 +775,29 @@ function echoesTitle(name, title) {
   return !n || t === n || t.startsWith(`${n} `);
 }
 
+// What a row that leads with its act leaves out of the title, when that
+// says what the night is: "Tacoma Symphony: Brahms 4" → "Brahms 4", a drag
+// queen's "Drag Brunch", a festival's name. Only for the stage family and
+// PROGRAM_KINDS (a band's "I'm People Tour" is noise), never when it only
+// repeats the kind ("The Glitter Revue: Burlesque"), and cut to fit a row.
+function programOf(item, kind, lineup) {
+  if (!PROGRAM_KINDS.has(kind.key) && kind.family !== 'stage') return null;
+  if (!lineup[0] || usesTitle(kind, lineup)) return null;
+  const parts = cleanTitle(item.title).match(/^(.+?)\s*(?::|\s[–—-]\s)\s*(.+)$/);
+  if (!parts) return null;
+  const head = artistKey(lineup[0]);
+  const names = (text) => {
+    const k = artistKey(text);
+    return k === head || k.startsWith(`${head} `);
+  };
+  const rest = names(parts[1]) ? parts[2] : names(parts[2]) ? parts[1] : null;
+  const text = String(rest || '').replace(/^["“‘']+|["”’']+$/g, '').trim();
+  if (!/[a-z]/i.test(text)) return null;
+  const key = canonTag(text);
+  if (GENERIC_TAGS.has(key) || KIND_ECHOES.has(key) || echoesKind(key, kind)) return null;
+  return clip(text, MAX_PROGRAM);
+}
+
 function billLink(item, kind, lineup) {
   if (['night', 'stage', 'other'].includes(kind.family) && usesTitle(kind, lineup)) {
     const acts = lineup.filter((n) => !echoesTitle(n, item.title));
@@ -695,9 +830,13 @@ function firstSentence(text, max = 110) {
     end = m.index + m[0].length;
     break;
   }
-  const s = t.slice(0, end);
-  if (s.length <= max) return s;
-  const cut = s.slice(0, max - 1);
+  return clip(t.slice(0, end), max);
+}
+
+// Text cut at a word to fit `max` characters, with an ellipsis when cut.
+function clip(text, max) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 1);
   const at = cut.lastIndexOf(' ');
   return `${(at > max * 0.6 ? cut.slice(0, at) : cut).replace(/[\s,;:–—-]+$/, '')}…`;
 }
@@ -754,6 +893,7 @@ function showFeel(item, facts) {
     fans,
     link,
     preview: playable ? previewOf(head, facts, { family: kind.family }) : null,
+    program: programOf(item, kind, lineup),
     known: {
       similar: Boolean(head) && hasOwnList(head, facts),
       profile: Boolean(profile && performerDescription(profile.description, kind.family)),

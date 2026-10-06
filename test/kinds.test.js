@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { kindOf, groupOf, usesTitle, cleanTitle, flagsOf, sortFlags, titleStem, seriesKey } from '../src/kinds.js';
+import { parseLineup } from '../src/lineup.js';
 
 const kind = (title, { category = 'music', tags = '', lineup = [], found = false } = {}) =>
   kindOf({ title, category, genre_tags: tags, _lineup: lineup }, { headlinerFound: found });
@@ -46,6 +47,29 @@ test('band names that look like kinds stay Music', () => {
   assert.equal(kind('Pearl Jam Tribute Night: Ten').key, 'tribute');
 });
 
+test("a support act's name doesn't make a known headliner's show another kind", () => {
+  // The lineup the parser really produces, with the headliner known to MusicBrainz.
+  const billed = (title, category = 'music') => {
+    const e = { title, category, _lineup: parseLineup(title) };
+    const k = kindOf(e, { headlinerFound: true });
+    return [k.key, groupOf(e, k)];
+  };
+  assert.deepEqual(billed('Joyce Manor w/ Movie Star Junkies'), ['music', 'music']);
+  assert.deepEqual(billed('Wet Leg w/ Black Market Karma'), ['music', 'music']);
+  assert.deepEqual(billed('Wet Leg with Middle Class Rut'), ['music', 'music']);
+  assert.deepEqual(billed('Alvvays w/ Cabaret Voltaire'), ['music', 'music']);
+  assert.deepEqual(billed('The Jam w/ Market Hotel'), ['music', 'music']);
+  // Event words aren't acts, so they survive the names coming out.
+  assert.deepEqual(billed('Movie Night: The Goonies', 'other'), ['screening', 'film']);
+  assert.deepEqual(billed('Trivia Night hosted by Jen Ray', 'other'), ['trivia', 'around']);
+  assert.deepEqual(billed('Velvet Static (DJ set)'), ['dj', 'music']);
+  // A scraped "Bingo Players" parses to no act at all ("bingo" is an event
+  // word), so nothing says it's a band: it reads as a bingo night. With a
+  // structured lineup (Ticketmaster's attractions) it's Music, as above.
+  assert.deepEqual(parseLineup('Bingo Players'), []);
+  assert.equal(kindOf({ title: 'Bingo Players', category: 'music', _lineup: parseLineup('Bingo Players') }).key, 'bingo');
+});
+
 test('tags decide theater and classical, and a big festival bill is a Festival', () => {
   assert.equal(kind('Hamlet', { category: 'other', tags: 'Theatre' }).key, 'theater');
   assert.equal(kind('Wicked', { category: 'music', tags: 'Musical, Arts' }).key, 'theater', 'a musical filed as music');
@@ -76,6 +100,8 @@ test('night and stage listings lead with their title; a drag show with a named q
   assert.equal(usesTitle(kindOf({ title: 'PUP', category: 'music' })), false);
   assert.equal(cleanTitle('SOLD OUT! Trivia Night'), 'Trivia Night');
   assert.equal(cleanTitle('Cancelled: Karaoke'), 'Karaoke');
+  assert.equal(cleanTitle('ALMOST SOLD OUT: Trivia Night'), 'Trivia Night');
+  assert.equal(cleanTitle('Nearly Sold Out - Drag Brunch'), 'Drag Brunch');
 });
 
 test('flags: cancelled, sold out, few left, release show, free — and "Free Throw" is a band', () => {
@@ -89,6 +115,15 @@ test('flags: cancelled, sold out, few left, release show, free — and "Free Thr
   assert.deepEqual(keys('Jazz Jam', 'Free'), ['free']);
   assert.deepEqual(keys('Jazz Jam (free)'), ['free']);
   assert.deepEqual(keys('Free Throw w/ Hot Mulligan', '$20'), []);
+  // "Almost" and "nearly" sold out still have tickets: Few left, in the title or the price.
+  assert.deepEqual(keys('ALMOST SOLD OUT: Wet Leg'), ['low-tix']);
+  assert.deepEqual(keys('Wet Leg (Almost Sold Out)'), ['low-tix']);
+  assert.deepEqual(keys('Wet Leg (Nearly Sold Out)'), ['low-tix']);
+  assert.deepEqual(keys('Wet Leg - Almost  Sold-Out!'), ['low-tix']);
+  assert.deepEqual(keys('Hollow Coast', '$25 · Almost Sold Out'), ['low-tix']);
+  assert.deepEqual(keys('Hollow Coast', 'Nearly sold out'), ['low-tix']);
+  assert.deepEqual(keys('Wet Leg - SOLD OUT!'), ['sold-out']);
+  assert.deepEqual(keys('Sold Out: Wet Leg'), ['sold-out']);
   assert.deepEqual(
     sortFlags([{ key: 'free' }, { key: 'one-night' }, { key: 'sold-out' }]).map((f) => f.key),
     ['sold-out', 'one-night', 'free']
@@ -104,5 +139,11 @@ test('title stems drop what changes from week to week', () => {
   assert.equal(titleStem('Tractor Presents: Bob Sumner'), 'bob sumner');
   assert.equal(titleStem('Comedy Showcase Vol. 3'), 'comedy showcase');
   assert.equal(seriesKey({ title: 'Trivia Night #12', venue: 'The Swiss' }), seriesKey({ title: 'Trivia Night #13', venue: 'The Swiss' }));
+  // A night's host changes every week; a band's support act doesn't make it a series.
+  const mic = (host) => seriesKey({ title: `Comedy Open Mic hosted by ${host}`, venue: 'Tacoma Comedy Club', category: 'comedy' });
+  assert.equal(mic('Jen Ray'), mic('Sam Lee'));
+  assert.equal(mic('Jen Ray'), 'tacoma comedy club|comedy open mic');
+  assert.equal(seriesKey({ title: 'Trivia w/Sam Lee', venue: 'The Swiss', category: 'other' }), 'swiss|trivia');
+  assert.equal(titleStem('Joyce Manor w/ PUP'), 'joyce manor w pup', 'only nights lose the tail');
   assert.notEqual(seriesKey({ title: 'Trivia Night', venue: 'The Swiss' }), seriesKey({ title: 'Trivia Night', venue: 'Doyle’s' }));
 });

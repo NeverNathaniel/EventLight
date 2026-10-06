@@ -19,7 +19,8 @@ import { DAYS_AHEAD } from './cinema/index.js';
 import { todayISO, addDays, localISO } from './dates.js';
 import { annotate } from './annotate.js';
 import { loadFacts, displayTags, fansOf, descriptorOf, previewOf } from './feel.js';
-import { chooseDayPicks, chooseWeekPicks, dayDek, weekNote, loadCurated } from './curation.js';
+import { chooseDayPicks, chooseWeekPicks, dayDek, weekNote, loadCurated, startedLongAgo } from './curation.js';
+import { flagsOf } from './kinds.js';
 
 export const WEEK_DAYS = 7;
 // A show needs this to be a top pick — roughly a favorite or sound-alike on
@@ -33,8 +34,6 @@ const DAY_PICKS = 3;
 const FURTHER_LIMIT = 12;
 // Each group on the day page shows this many, best first, then "+N more".
 const GROUP_SHOWN = 5;
-// On today's page, shows that started this long ago are folded away.
-const STARTED_MINUTES = 60;
 const GROUPS = [
   ['music', 'Music'],
   ['comedy', 'Comedy'],
@@ -46,6 +45,9 @@ const timeOf = (e) => e.time || '99:99';
 const byTime = (a, b) => String(a.date).localeCompare(String(b.date)) || timeOf(a).localeCompare(timeOf(b));
 const byPick = (a, b) => (b._pick ?? 0) - (a._pick ?? 0) || byTime(a, b);
 const hasFlag = (e, key) => (e._flags || []).some((f) => f.key === key);
+// A cancelled or postponed show is dropped from every list but Saved (where
+// it's struck through), so it can't fill a group, a count or a strip total.
+const cancelled = (e) => (e._flags || flagsOf(e)).some((f) => f.key === 'cancelled');
 
 function clock(d) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -75,8 +77,9 @@ export function theaterHorizons(movies = getMovies()) {
 // carries its run (first and last date, how many showings) for the film score.
 export function filmsByDay(from, to, now = Date.now(), movies = getMovies()) {
   const { nowPlaying, special, comingSoon } = groupMovies(movies, now, { windowDays: DAYS_AHEAD });
-  // First date of the run from every listed showtime, past ones included, so
-  // a run whose shows today are over doesn't look like it opens tomorrow.
+  // First date of the run from every stored showtime, including today's that
+  // are over. The store only ever holds what was still ahead at the last
+  // fetch, so this isn't proof of an opening on its own (see filmScore).
   const listed = new Map(movies.map((m) => [m.id, m.showtimes || []]));
   const out = new Map();
   const add = (m, isSpecial) => {
@@ -115,6 +118,7 @@ export function filmsByDay(from, to, now = Date.now(), movies = getMovies()) {
         director: m.director,
         starring: m.starring,
         year: m.year,
+        release_date: m.release_date || null,
         genre: m.genre,
         synopsis: m.synopsis,
         poster_url: m.poster_url,
@@ -133,13 +137,40 @@ export function filmsByDay(from, to, now = Date.now(), movies = getMovies()) {
   return out;
 }
 
-// Every show and film from `from` to `to`, dressed, keyed by date.
+// The Film list in Explore: the cinema groups (special, now playing, coming
+// soon, plus what's filtered or hidden), with each listed film dressed as of
+// its next showing — the flags, feel line and _pick that date's page gives
+// it — and each group best first (ties keep the soonest-first order).
+export function movieGroups({ today = todayISO(), now = Date.now(), movies = getMovies() } = {}) {
+  const groups = groupMovies(movies, now, { windowDays: DAYS_AHEAD });
+  const listed = [...groups.special, ...groups.nowPlaying, ...groups.comingSoon];
+  if (!listed.length) return groups;
+  const nextDate = (m) => localISO(new Date(m.showtimes[0]));
+  const dates = listed.map(nextDate).sort();
+  const byDay = filmsByDay(dates[0], dates[dates.length - 1], now, movies);
+  const dressed = new Map();
+  for (const m of listed) {
+    const item = (byDay.get(nextDate(m)) || []).find((f) => f.movie_id === m.id);
+    if (item) dressed.set(m.id, item);
+  }
+  annotate([...dressed.values()], { now, today, horizonByTheater: theaterHorizons(movies) });
+  for (const m of listed) {
+    const f = dressed.get(m.id);
+    if (f) Object.assign(m, { _kind: f._kind, _flags: f._flags, _feel: f._feel, _reasons: f._reasons, _film: f._film, _pick: f._pick });
+  }
+  for (const key of ['special', 'nowPlaying', 'comingSoon']) groups[key].sort((a, b) => (b._pick ?? 0) - (a._pick ?? 0));
+  return groups;
+}
+
+// Every show and film from `from` to `to`, dressed, keyed by date. Cancelled
+// and postponed shows are left out.
 function dressedDays(from, to, { today, now, movies }) {
   const films = filmsByDay(from, to, now, movies);
   const items = [...scoredShows(from, to, now), ...[...films.values()].flat()];
   annotate(items, { now, today, horizonByTheater: theaterHorizons(movies) });
   const byDate = new Map();
   for (const e of items) {
+    if (cancelled(e)) continue;
     if (!byDate.has(e.date)) byDate.set(e.date, []);
     byDate.get(e.date).push(e);
   }
@@ -193,7 +224,7 @@ function summarize(date, items, { today, now }) {
     picks,
     picksLabel: label,
     hasPick: picks.some((p) => (p._pick ?? 0) >= PICK_MIN),
-    dek: dayDek(picks, { counts, regularKinds: regularKinds(items) }),
+    dek: dayDek(picks, { counts, regularKinds: regularKinds(items), label }),
   };
 }
 
@@ -208,18 +239,20 @@ function curatedInfo(now) {
 export function weekBrief({ today = todayISO(), now = Date.now(), movies = getMovies() } = {}) {
   const to = addDays(today, WEEK_DAYS - 1);
   const byDate = dressedDays(today, to, { today, now, movies });
-  const picks = chooseWeekPicks([...byDate.values()].flat(), { max: MAX_PICKS, pickMin: PICK_MIN });
+  const picks = chooseWeekPicks([...byDate.values()].flat(), { max: MAX_PICKS, pickMin: PICK_MIN, now, today });
 
   const days = [];
   for (let i = 0; i < WEEK_DAYS; i += 1) {
     const date = addDays(today, i);
     const items = byDate.get(date) || [];
     const day = summarize(date, items, { today, now });
+    // The films line is for the films not already shown as picks: `count`
+    // is how many of those there are, so "+N" never counts a pick again.
     const shown = new Set(day.picks.map((p) => p.id));
-    const films = items.filter((e) => e._group === 'film').sort(filmOrder);
+    const films = items.filter((e) => e._group === 'film' && !shown.has(e.id)).sort(filmOrder);
     day.films = {
       count: films.length,
-      top: films.filter((f) => !shown.has(f.id)).slice(0, 2).map((f) => ({ id: f.id, title: f.title, note: filmNote(f) })),
+      top: films.slice(0, 2).map((f) => ({ id: f.id, title: f.title, note: filmNote(f) })),
     };
     day.regulars = day.counts.regulars;
     day.more = day.total - day.picks.length;
@@ -227,7 +260,9 @@ export function weekBrief({ today = todayISO(), now = Date.now(), movies = getMo
   }
 
   const further = annotate(
-    scoredShows(addDays(to, 1), addDays(today, 365), now).filter(hasArtistMatch).slice(0, FURTHER_LIMIT),
+    scoredShows(addDays(to, 1), addDays(today, 365), now)
+      .filter((e) => hasArtistMatch(e) && !cancelled(e))
+      .slice(0, FURTHER_LIMIT),
     { now, today }
   );
   return { today, from: today, to, note: weekNote(days), curated: curatedInfo(now), picks, days, further };
@@ -238,11 +273,6 @@ function lastListedDate(movies) {
   const shows = db.prepare('SELECT MAX(date) AS d FROM events WHERE hidden = 0').get().d || null;
   const films = [...theaterHorizons(movies).values()].sort().pop() || null;
   return [shows, films].filter(Boolean).sort().pop() || null;
-}
-
-function minutes(t) {
-  const m = /^(\d{2}):(\d{2})/.exec(t || '');
-  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
 // A day's own page: its picks, your other plans, then everything else in
@@ -268,12 +298,12 @@ export function dayPage(date, { today = todayISO(), now = Date.now(), movies = g
   const plans = items.filter((e) => !taken.has(e.id) && (e.going || e.interested)).sort(byTime);
   plans.forEach((e) => taken.add(e.id));
 
-  // Today, a show that started an hour ago is mostly over.
-  const nowDate = new Date(now);
-  const nowMin = date === today ? nowDate.getHours() * 60 + nowDate.getMinutes() : null;
-  const started = nowMin == null
-    ? []
-    : items.filter((e) => !taken.has(e.id) && e.kind !== 'film' && minutes(e.time) != null && minutes(e.time) < nowMin - STARTED_MINUTES);
+  // Today, a show that started an hour ago is mostly over. Its latest start
+  // counts, as for the picks: a merged early/late pair stays while the late
+  // show is still ahead.
+  const started = date === today
+    ? items.filter((e) => !taken.has(e.id) && e.kind !== 'film' && startedLongAgo(e, now))
+    : [];
   started.forEach((e) => taken.add(e.id));
 
   const regulars = items.filter((e) => !taken.has(e.id) && e._regular).sort(byTime);
@@ -358,7 +388,9 @@ export function eventDetails(id, { today = todayISO(), now = Date.now() } = {}) 
   const ctx = buildContext(now);
   const [event] = annotate(scoreEvents([row], now).map((e) => ({ ...e, kind: e.category })), { now, today, ctx });
   const sameNight = annotate(
-    scoredShows(row.date, row.date, now).filter((e) => e.id !== row.id && !(row.headliner_key && e.headliner_key === row.headliner_key)),
+    scoredShows(row.date, row.date, now).filter(
+      (e) => e.id !== row.id && !(row.headliner_key && e.headliner_key === row.headliner_key) && !cancelled(e)
+    ),
     { now, today, ctx }
   )
     .sort(byPick)

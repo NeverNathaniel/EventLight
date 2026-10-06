@@ -49,10 +49,34 @@ function criticScore(film) {
   return null;
 }
 
+// Is the run's first listed date really its opening? The stored showtimes
+// are only the ones still ahead when the theater was last fetched — each
+// fetch replaces them — so a film that has been running but doesn't play
+// today (weekends only, a dark Wednesday, a matinee that was over by the
+// evening refresh) would look like it opens on its next date. Two pieces of
+// evidence are required instead:
+//   - the release date: an opening is within a day before (Thursday
+//     previews) or two after it. A film with no release date, a repertory
+//     title or a run that reached this theater weeks after release is never
+//     called an opening — a missing "Opens" costs less than a false one;
+//   - nothing has dropped off the list: once a showing passes, the most
+//     showtimes ever listed (peak) is more than what's left, so the run has
+//     already played here.
+const OPENS_BEFORE_RELEASE = 1;
+const OPENS_AFTER_RELEASE = 2;
+function opensNear(film) {
+  const release = String(film.release_date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(release)) return false;
+  const offset = daysBetween(release, film.date);
+  if (!(offset >= -OPENS_BEFORE_RELEASE && offset <= OPENS_AFTER_RELEASE)) return false;
+  return film.peak == null || film.upcoming == null || film.peak <= film.upcoming;
+}
+
 // How much a film on a given date deserves a place among the picks. Films
 // aren't matched against your taste, so it's what makes a screening an
 // occasion: one night only, the last days of a well-reviewed run, an opening.
-//   film: a filmsByDay() item (special, upcoming, peak, firstDate, lastDate…)
+//   film: a filmsByDay() item (special, upcoming, peak, firstDate, lastDate,
+//         release_date…)
 //   horizonByTheater: theater → the last date it has posted showtimes for
 export function filmScore(film, { today = todayISO(), horizonByTheater = new Map() } = {}) {
   const special = Boolean(film.special);
@@ -80,7 +104,7 @@ export function filmScore(film, { today = todayISO(), horizonByTheater = new Map
     film.lastDate <= addDays(horizon, -3);
   // Today's first showing may already be trimmed away, so a run can't be
   // told apart from an opening on today itself.
-  const opens = run && Boolean(film.firstDate) && film.firstDate === film.date && film.date > today;
+  const opens = run && Boolean(film.firstDate) && film.firstDate === film.date && film.date > today && opensNear(film);
   if (lastChance) {
     score += 1.5;
     flags.push({ key: 'last-chance', label: 'Last chance' });
@@ -119,11 +143,16 @@ const MILESTONE_RE = /farewell|reunion|anniversary/i;
 // comedian is worth seeing, but not over a band you love.
 const COMEDY_MAX = 8;
 
+// A cancelled show's pick score: below anything real, and finite so it
+// survives JSON (−Infinity would arrive as null, and a list falling back to
+// _score would star a cancelled favorite).
+export const CANCELLED_PICK = -100;
+
 // The editor's score: `_score` plus what the taste match can't see. Uses
 // _score, _kind, _flags, _regular, _run, _feel.known, _feel.descriptor,
 // _curated, going, interested, source, _lineup and _film.
 export function pickScore(item) {
-  if (hasFlag(item, 'cancelled')) return -Infinity;
+  if (hasFlag(item, 'cancelled')) return CANCELLED_PICK;
   const kind = item._kind || kindOf(item);
   const score = Number(item._score) || 0;
   const lineup = item._lineup || [];
@@ -141,10 +170,10 @@ export function pickScore(item) {
     case 'comedy': {
       // Comedy has no genre tags to match, so a touring name (Ticketmaster
       // only lists the big rooms) or a comedian with a Wikipedia line is
-      // the signal. Open mics and nameless showcases go to the back.
+      // the signal. Nameless showcases go to the back.
       const notable = item.source === 'api' || Boolean(item._feel?.descriptor);
       value = score + (notable ? 3 : 0) + (item._run ? 1 : 0);
-      if (kind.key === 'open-mic' || (lineup.length >= 4 && !notable)) value -= 3;
+      if (lineup.length >= 4 && !notable) value -= 3;
       if (!yours) value = Math.min(value, COMEDY_MAX);
       break;
     }
@@ -158,6 +187,10 @@ export function pickScore(item) {
     default:
       value = score;
   }
+  // Open mics go to the back, comedy or music: an open mic is a night family
+  // kind (a comedy one only carries domain 'comedy'), so this sits outside
+  // the switch. A genre hit makes "Songwriter Night" look like a show.
+  if (kind.key === 'open-mic' && !yours) value -= 3;
   // The same night every week is never news, unless it's your band's residency.
   if (item._regular && !yours) value = Math.min(value, 1);
   if (item.going) value += 5;
@@ -175,14 +208,16 @@ const STARTED_MS = 60 * 60 * 1000;
 
 // The latest start among an item's showtimes: an early show that's over
 // doesn't rule out the late one.
-function lastStart(item) {
+export function lastStart(item) {
   const times = [item.time, ...(item._times || []), ...(item.times || [])].filter((t) =>
     /^\d{1,2}:\d{2}/.test(t || '')
   );
   return times.map((t) => t.padStart(5, '0').slice(0, 5)).sort().pop() || null;
 }
 
-function startedLongAgo(item, now) {
+// True when an item's last start was over an hour before `now`. Callers
+// decide which day it applies to (only today).
+export function startedLongAgo(item, now) {
   const t = lastStart(item);
   if (!t) return false;
   return now - new Date(`${item.date}T${t}:00`).getTime() > STARTED_MS;
@@ -218,20 +253,21 @@ const byPick = (a, b) => pickOf(b) - pickOf(a);
 // days, a second film, an act already picked, and on today anything that
 // started over an hour ago. Returns copies carrying `_role` (so the same
 // item in the day's groups has none), Going first, then strongest first,
-// plus a label: 'top' when there are picks, 'regulars' when the only things
-// on are the weekly regulars, else 'none'.
+// plus a label: 'top' when there are picks, 'started' when nothing is left
+// to pick only because tonight's best has already started, 'regulars' when
+// the only things on are the weekly regulars, else 'none'.
 export function chooseDayPicks(items, { k = 3, now = Date.now(), today = localISO(new Date(now)), date } = {}) {
   const live = items.filter((e) => !hasFlag(e, 'cancelled'));
   // A plan stays a plan once it starts; everything else that began an hour
   // ago is too late to recommend.
   const plans = live.filter((e) => e.going).sort(byPick);
-  const open = live.filter((e) => !e.going && !((date ?? e.date) === today && startedLongAgo(e, now)));
+  const late = (e) => (date ?? e.date) === today && startedLongAgo(e, now);
+  const open = live.filter((e) => !e.going && !late(e));
   const isRegular = (e) => Boolean(e._regular) && !hasArtistMatch(e);
   const filmOk = (e) => e.kind !== 'film' || Boolean(e._film?.eligible);
   // ×0.3 alone would still let a sold-out favorite through; you can't buy in.
-  const candidates = open.filter(
-    (e) => !isRegular(e) && filmOk(e) && !hasFlag(e, 'sold-out') && pickOf(e) >= PICK_FLOOR
-  );
+  const pickable = (e) => !isRegular(e) && filmOk(e) && !hasFlag(e, 'sold-out') && pickOf(e) >= PICK_FLOOR;
+  const candidates = open.filter(pickable);
 
   const chosen = plans.slice(0, k);
   while (chosen.length < k) {
@@ -255,6 +291,7 @@ export function chooseDayPicks(items, { k = 3, now = Date.now(), today = localIS
   }));
   let label = 'none';
   if (picks.length) label = 'top';
+  else if (live.some((e) => !e.going && late(e) && pickable(e))) label = 'started';
   else if (open.length && open.every(isRegular)) label = 'regulars';
   return { picks, label };
 }
@@ -263,8 +300,10 @@ export function chooseDayPicks(items, { k = 3, now = Date.now(), today = localIS
 // The week's top picks: shows you're going to, then the strongest of the
 // rest (`_pick` ≥ pickMin, not sold out) with a spread — at most two a
 // night, each act once (its best night), one film (a strong one) and two
-// comedy shows. Best first.
-export function chooseWeekPicks(items, { max = 8, pickMin = 8 } = {}) {
+// comedy shows. Best first. As with the day's picks, tonight's shows that
+// started over an hour ago are left out (plans stay), so the tickets and
+// the day's sentence agree.
+export function chooseWeekPicks(items, { max = 8, pickMin = 8, now = Date.now(), today = localISO(new Date(now)) } = {}) {
   const byPickThenDate = (a, b) =>
     pickOf(b) - pickOf(a) ||
     String(a.date).localeCompare(String(b.date)) ||
@@ -272,8 +311,9 @@ export function chooseWeekPicks(items, { max = 8, pickMin = 8 } = {}) {
   const live = items.filter((e) => !hasFlag(e, 'cancelled'));
   const plans = live.filter((e) => e.going).sort(byPickThenDate);
   const filmOk = (e) => e.kind !== 'film' || (Boolean(e._film?.eligible) && e._film.score >= 8);
+  const late = (e) => e.date === today && startedLongAgo(e, now);
   const rest = live
-    .filter((e) => !e.going && !hasFlag(e, 'sold-out') && pickOf(e) >= pickMin && filmOk(e))
+    .filter((e) => !e.going && !late(e) && !hasFlag(e, 'sold-out') && pickOf(e) >= pickMin && filmOk(e))
     .sort(byPickThenDate);
 
   const chosen = [];
@@ -398,10 +438,12 @@ function sentence(parts) {
 // are dropped to fit.
 //   counts: { total, regulars, … } for the whole day (shows and films)
 //   regularKinds: lowercase kind labels of the day's regulars ('trivia', …)
-export function dayDek(picks, { counts, regularKinds = [] } = {}) {
+//   label: chooseDayPicks' label ('started' says why there are no picks)
+export function dayDek(picks, { counts, regularKinds = [], label } = {}) {
   if (!picks.length) {
     const total = counts?.total || 0;
     if (!total) return 'Nothing listed yet.';
+    if (label === 'started') return 'Tonight’s best has already started.';
     if ((counts.regulars || 0) >= total) {
       const kinds = [...new Set(regularKinds)].slice(0, 3);
       return kinds.length ? `Quiet one: just the regulars (${kinds.join(', ')}).` : 'Quiet one: just the regulars.';
@@ -419,15 +461,17 @@ export function dayDek(picks, { counts, regularKinds = [] } = {}) {
 // ── Week note ───────────────────────────────────────────────────────────────
 // One line under the Week's dates: the strongest night (its best pick, plus
 // half the second so a night with two good shows beats one with one) and the
-// nights with nothing to pick. Null when the whole week is quiet.
-//   days: [{ date, picks }]
+// nights with nothing to pick. Null when the whole week is quiet. Tonight
+// with no picks left only because its best shows have started isn't quiet:
+// the day's own sentence says "Tonight’s best has already started".
+//   days: [{ date, picks, picksLabel }]
 export function weekNote(days) {
   let best = null;
   const quiet = [];
   for (const day of days || []) {
     const picks = day.picks || [];
     if (!picks.length) {
-      quiet.push(day.date);
+      if (day.picksLabel !== 'started') quiet.push(day.date);
       continue;
     }
     const value = (picks[0]._pick || 0) + 0.5 * (picks[1]?._pick || 0);
@@ -454,19 +498,76 @@ const isMonthly = (g) => g >= 27 && g <= 36;
 // The lower middle, so one skipped week ([7, 14]) still reads as weekly.
 const median = (list) => [...list].sort((a, b) => a - b)[Math.floor((list.length - 1) / 2)];
 
-function cadenceOf(dates, gaps, titles) {
+// Weekdays in the order a week is read, Monday first.
+const weekOrder = (day) => (day + 6) % 7;
+
+// "Tue & Thu", "Mon, Wed & Fri", "Thu–Sun" (three or more days in a row).
+function dayList(days) {
+  const sorted = [...days].sort((a, b) => weekOrder(a) - weekOrder(b));
+  const spans = [];
+  for (const day of sorted) {
+    const last = spans[spans.length - 1];
+    if (last && weekOrder(day) === weekOrder(last[last.length - 1]) + 1) last.push(day);
+    else spans.push([day]);
+  }
+  const parts = spans.flatMap((span) =>
+    span.length >= 3 ? [`${SHORT_DAYS[span[0]]}–${SHORT_DAYS[span[span.length - 1]]}`] : span.map((d) => SHORT_DAYS[d])
+  );
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} & ${parts[parts.length - 1]}` : parts[0];
+}
+
+// The weekdays on which a series keeps a steady interval of its own: three
+// dates a week, a fortnight or a month apart, or — for trivia, karaoke and
+// open mics — two a week or a fortnight apart. Each weekday is checked on
+// its own because two nights a week interleave: a Tuesday-and-Thursday
+// karaoke night's gaps run 2, 5, 2, 5 and read as no cadence at all.
+//   → [{ day, gap }], Monday first
+function steadyWeekdays(dates, { night }) {
+  const byDay = new Map();
+  for (const d of dates) {
+    const day = weekdayOf(d);
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(d);
+  }
+  const out = [];
+  for (const [day, list] of byDay) {
+    const gaps = list.slice(1).map((d, i) => daysBetween(list[i], d));
+    if (!gaps.length) continue;
+    const gap = median(gaps);
+    const steady = list.length >= 3 && (isWeekly(gap) || isFortnightly(gap) || isMonthly(gap));
+    if (steady || (night && gaps.some((g) => g === 7 || g === 14))) out.push({ day, gap });
+  }
+  return out.sort((a, b) => weekOrder(a.day) - weekOrder(b.day));
+}
+
+function cadenceOf(dates, titles, steady) {
+  const gaps = dates.slice(1).map((d, i) => daysBetween(dates[i], d));
   const gap = gaps.length ? median(gaps) : null;
   if ((gap != null && isMonthly(gap)) || (gap == null && titles.some((t) => /\bmonthly\b/i.test(t)))) return 'Monthly';
+  if (steady.length === 7) return 'Every night';
+  if (steady.length > 1) return `Every ${dayList(steady.map((s) => s.day))}`;
+  if (steady.length === 1) {
+    const { day, gap: own } = steady[0];
+    if (isMonthly(own)) return 'Monthly';
+    return isFortnightly(own) ? `Every other ${SHORT_DAYS[day]}` : `Every ${SHORT_DAYS[day]}`;
+  }
   const weekdays = new Set(dates.map(weekdayOf));
   if (weekdays.size !== 1) return 'Weekly';
   const day = SHORT_DAYS[weekdayOf(dates[0])];
   return gap != null && isFortnightly(gap) ? `Every other ${day}` : `Every ${day}`;
 }
 
-function findRegulars(rows) {
+// A play's performances fall on the same weekdays week after week (Thursday
+// to Sunday for a month) and are a run, not a regular — so the weekday check
+// isn't used for stage kinds, or for untagged listings ('event'), which is
+// where an unlabelled play lands. A weekly drag brunch on one day still
+// counts through the whole-series check.
+const weekdaysCount = (kind) => kind.family !== 'stage' && kind.key !== 'event';
+
+function findRegulars(rows, kinds) {
   const bySeries = new Map();
   for (const r of rows) {
-    const series = seriesKey(r);
+    const series = seriesKey(r, kinds.get(r.id));
     // A title that was nothing but dates and numbers has no stem to match on.
     if (series.endsWith('|')) continue;
     if (!bySeries.has(series)) bySeries.set(series, []);
@@ -477,14 +578,17 @@ function findRegulars(rows) {
     const dates = [...new Set(list.map((r) => r.date))].sort();
     const gaps = dates.slice(1).map((d, i) => daysBetween(dates[i], d));
     const gap = gaps.length ? median(gaps) : null;
+    const listKinds = list.map((r) => kinds.get(r.id));
     // Trivia and open mics are regulars by nature: two listings a week or a
     // fortnight apart, or a title that says so ("every Tuesday"), is enough.
-    const nightHint = gaps.some((g) => g === 7 || g === 14) || list.some((r) => CADENCE_WORD_RE.test(r.title || ''));
+    const night = listKinds.some((k) => k.family === 'night');
+    const steady = listKinds.every(weekdaysCount) ? steadyWeekdays(dates, { night }) : [];
     const regular =
       (dates.length >= 3 && (isWeekly(gap) || isFortnightly(gap) || isMonthly(gap))) ||
-      (nightHint && list.some((r) => kindOf(r).family === 'night'));
+      steady.length > 0 ||
+      (night && list.some((r) => CADENCE_WORD_RE.test(r.title || '')));
     if (!regular) continue;
-    const info = { series, cadence: cadenceOf(dates, gaps, list.map((r) => r.title || '')) };
+    const info = { series, cadence: cadenceOf(dates, list.map((r) => r.title || ''), steady) };
     for (const r of list) out.set(r.id, info);
   }
   return out;
@@ -499,12 +603,18 @@ function runText(dates) {
   return `Until ${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
+// A band or a comedian on more nights in a row than this is a house night
+// whose "run" would end wherever the listings do, not a run.
+const RUN_MAX_SPAN = 7;
+
 // The same act at the same venue on nights a few days apart: a comedian's
-// Thursday-to-Saturday weekend, a band's two-night stand.
-function findRuns(rows) {
+// Thursday-to-Saturday weekend, a band's two-night stand, a play's run.
+// Regulars are decided first and never become runs, and a night (a jam, a
+// karaoke night) is never a run: its Tuesday and Thursday aren't one stretch.
+function findRuns(rows, kinds, regular) {
   const byAct = new Map();
   for (const r of rows) {
-    if (!r.headliner_key) continue;
+    if (!r.headliner_key || regular.has(r.id) || kinds.get(r.id).family === 'night') continue;
     const key = `${artistKey(r.venue)}|${r.headliner_key}`;
     if (!byAct.has(key)) byAct.set(key, []);
     byAct.get(key).push(r);
@@ -513,6 +623,7 @@ function findRuns(rows) {
   for (const list of byAct.values()) {
     const dates = [...new Set(list.map((r) => r.date))].sort();
     if (dates.length < 2) continue;
+    const act = ['music', 'comedy'].includes(kinds.get(list[0].id).family);
     const stretches = [[dates[0]]];
     for (const d of dates.slice(1)) {
       const current = stretches[stretches.length - 1];
@@ -521,6 +632,7 @@ function findRuns(rows) {
     }
     for (const stretch of stretches) {
       if (stretch.length < 2) continue;
+      if (act && daysBetween(stretch[0], stretch[stretch.length - 1]) > RUN_MAX_SPAN) continue;
       const info = { text: runText(stretch), dates: stretch };
       for (const r of list) if (stretch.includes(r.date)) out.set(r.id, info);
     }
@@ -544,11 +656,12 @@ export function regularsIndex(today = todayISO()) {
   const key = `${today}|${sig.n}|${sig.at}|${sig.hidden}`;
   if (regularsCache.key === key) return regularsCache.value;
   const rows = windowRows.all(addDays(today, -REGULAR_BACK_DAYS), addDays(today, REGULAR_AHEAD_DAYS));
-  const regular = findRegulars(rows);
-  const run = findRuns(rows);
-  // A run is an occasion, never a regular (a weekly residency isn't a run:
-  // its nights are a week apart).
-  for (const id of run.keys()) regular.delete(id);
+  const kinds = new Map(rows.map((r) => [r.id, kindOf(r)]));
+  // Regulars first: a Tuesday-and-Thursday jam is a regular, not a
+  // "Tue–Thu" run, and a nightly happy hour isn't a run "until" the last
+  // date anyone has listed.
+  const regular = findRegulars(rows, kinds);
+  const run = findRuns(rows, kinds, regular);
   regularsCache = { key, value: { regular, run } };
   return regularsCache.value;
 }

@@ -181,9 +181,9 @@ function feelLine(e) {
     let out = tags;
     if (out && f.descriptor && (f.tags || []).length < 2) out = `${esc(f.descriptor)} · ${out}`;
     if (!out) out = f.habit ? `<i>${esc(f.habit)}</i>` : esc(f.descriptor || f.bill || '');
-    return [esc(e._regular?.cadence || ''), out, esc(run)].filter(Boolean).join(' · ');
+    return [esc(e._regular?.cadence || ''), esc(f.program || ''), out, esc(run)].filter(Boolean).join(' · ');
   }
-  return [esc(e._regular?.cadence || run), tags].filter(Boolean).join(' · ');
+  return [esc(e._regular?.cadence || run), esc(f.program || ''), tags].filter(Boolean).join(' · ');
 }
 
 // The "is it for us" line: a favorite on the bill, who they sound like, who
@@ -302,6 +302,7 @@ function ticket(e, { role = '' } = {}) {
       f.synopsis || e.synopsis ? `<span class="tk-sub tk-syn">${esc(f.synopsis || e.synopsis)}</span>` : '',
     ]
     : [
+      f.program ? `<span class="tk-sub">${esc(f.program)}</span>` : '',
       f.descriptor ? `<span class="tk-sub">${esc(f.descriptor)}</span>` : '',
       tags ? `<span class="tk-tags">${tags}</span>` : f.habit ? `<span class="tk-tags"><i>${esc(f.habit)}</i></span>` : '',
     ];
@@ -375,7 +376,9 @@ function renderWeek() {
   const days = b.days
     .map((d) => {
       const more = d.more - (d.films?.top?.length || 0);
-      const quiet = !d.total ? 'Nothing listed yet.' : d.picksLabel === 'regulars' ? 'Just the regulars.' : 'Quiet night. Nothing close to your taste.';
+      const quiet = !d.total
+        ? 'Nothing listed yet.'
+        : { regulars: 'Just the regulars.', started: 'Tonight’s best has already started.' }[d.picksLabel] || 'Quiet night. Nothing close to your taste.';
       return `<section>
       <a class="dh ${d.date === b.today ? 'today' : ''}" href="#day/${d.date}" title="${esc(d.dek || '')}">
         <span class="dl">${esc(dayName(d.date))}</span><span class="dd">${esc(shortDate(d.date))}</span><span class="dc">${d.total} on ›</span>
@@ -433,11 +436,14 @@ function renderDay() {
   const name = dayName(d.date);
   const pickHead = d.picks.length
     ? `Top picks ${forDay(d.date)}`
-    : d.picksLabel === 'regulars' ? 'Just the regulars' : 'Nothing stands out';
+    : { regulars: 'Just the regulars', started: 'Already under way' }[d.picksLabel] || 'Nothing stands out';
   const pickNote = d.picks.length
     ? ''
     : d.counts.total
-      ? `<p class="note">${d.picksLabel === 'regulars' ? 'Only the weekly nights are on. They’re below.' : 'Nothing close to your taste. Everything on is below, best first.'}</p>`
+      ? `<p class="note">${{
+        regulars: 'Only the weekly nights are on. They’re below.',
+        started: 'Tonight’s best began over an hour ago. It’s under Already started, below.',
+      }[d.picksLabel] || 'Nothing close to your taste. Everything on is below, best first.'}</p>`
       : `<p class="note">Nothing listed for ${esc(name === 'Tonight' ? 'tonight' : name)} yet. Venues usually post a few weeks out.</p>`;
   const picks = d.picks.length
     ? `<div class="tickets">${d.picks.map((e) => ticket(e, { role: e._role?.label || '' })).join('')}</div>`
@@ -574,8 +580,11 @@ function movieEntry(m, special) {
     showtimes: m.showtimes, venue: m.theater, city: m.city, ticket_url: m.url, special,
     rating: m.rating, runtime: m.runtime, director: m.director, starring: m.starring, year: m.year,
     genre: m.genre, synopsis: m.synopsis, poster_url: m.poster_url, trailer_url: m.trailer_url, mc_score: m.mc_score, rt_score: m.rt_score,
-    _flags: special && m.showtimes.length === 1 ? [{ key: 'one-night', label: 'One night only' }] : [],
-    _reasons: special ? [{ kind: 'film', text: m.showtimes.length === 1 ? 'One night only' : 'Special screening' }] : [],
+    // The server scores each film as of its next showing (flags, the feel
+    // line, reasons); an older server's listing falls back to the basics.
+    _kind: m._kind, _feel: m._feel, _film: m._film, _pick: m._pick,
+    _flags: m._flags || (special && m.showtimes.length === 1 ? [{ key: 'one-night', label: 'One night only' }] : []),
+    _reasons: m._reasons || (special ? [{ kind: 'film', text: m.showtimes.length === 1 ? 'One night only' : 'Special screening' }] : []),
   };
 }
 
@@ -760,8 +769,11 @@ function sheetArtist(a) {
     ? [p.type === 'Person' ? 'Solo artist' : p.type, p.from, p.since && p.type !== 'Person' ? `Since ${p.since}` : '', p.until ? `Until ${p.until}` : '']
         .filter(Boolean).join(' · ')
     : '';
-  const genres = [...new Set([...(a.tags || []), ...(p?.apple?.genre ? [p.apple.genre.toLowerCase()] : [])])];
-  const songs = p?.apple?.songs || [];
+  // An Apple match MusicBrainz disagrees with may be another act of the same
+  // name: its songs, genre and link aren't offered as theirs.
+  const apple = p?.apple && p.apple.match !== 'conflict' ? p.apple : null;
+  const genres = [...new Set([...(a.tags || []), ...(apple?.genre ? [apple.genre.toLowerCase()] : [])])];
+  const songs = apple?.songs || [];
   const links = [
     ['Spotify', p?.links?.spotify], ['Bandcamp', p?.links?.bandcamp], ['Website', p?.links?.website], ['YouTube', p?.links?.youtube],
   ].filter(([, url]) => isHttp(url));
@@ -797,7 +809,7 @@ function sheetArtist(a) {
       <div class="s-h">Coming up</div>
       ${a.upcoming.length ? a.upcoming.map((e) => row(e, { day: true })).join('') : '<p class="s-sub">No dates in the next year.</p>'}
       ${loading && p == null ? '' : sources.length ? `<p class="src-note">From ${sources.join(', ')}.</p>` : ''}`,
-    acts: `${isHttp(p?.apple?.url) ? `<a class="tix apple" href="${esc(p.apple.url)}" target="_blank" rel="noopener">Apple Music ↗</a>` : ''}
+    acts: `${isHttp(apple?.url) ? `<a class="tix apple" href="${esc(apple.url)}" target="_blank" rel="noopener">Apple Music ↗</a>` : ''}
       ${a.favorite
         ? '<button class="pb on-maybe" disabled>♥ Favorite</button>'
         : `<button class="pb" data-act="favorite" data-key="${enc(a.name)}">♥ Add to favorites</button>`}`,

@@ -12,18 +12,21 @@
 //      Wikipedia by name, so they get the comedy hint)
 //   2. the week's other music headliners MusicBrainz knows
 //   3. good matches 8 to 30 days out
-// Recurring nights (trivia, karaoke, DJ nights) and profiles we already have
-// are skipped. A run stops at its budget, its deadline, or the first sign
-// Apple is rate limiting us; the rest wait for the next refresh.
+// Recurring nights (trivia, karaoke, DJ nights, a band's weekly residency)
+// and profiles we already have are skipped; a few nights in a row (a
+// comedian's Thursday-to-Saturday) are a run, not a regular, and are looked
+// up. A run stops at its budget, its deadline, or the first sign Apple is
+// rate limiting us; the rest wait for the next refresh.
 import db from '../db/index.js';
 import { queryEvents, logRun } from '../db/queries.js';
 import { scoreEvents } from '../scoring/engine.js';
-import { kindOf, seriesKey } from '../kinds.js';
+import { kindOf } from '../kinds.js';
+import { regularsIndex } from '../curation.js';
 import { artistKey } from '../lineup.js';
 import { todayISO, addDays } from '../dates.js';
 import { PROFILE_PREFETCH_MAX } from '../config.js';
 import { getArtistProfile } from '../db/artists.js';
-import { artistProfile, SOURCES } from './profile.js';
+import { artistProfile, SOURCES, wikipediaWouldAsk } from './profile.js';
 
 const DEADLINE_MS = 10 * 60 * 1000;
 // A show worth a look: the score the Week lists stop dimming at (GOOD_MIN in
@@ -35,9 +38,6 @@ const FAR_DAYS = 30;
 // Two Wikimedia 429s in a row and Wikipedia is left alone for the rest of
 // the run.
 const WIKI_429_LIMIT = 2;
-// A night listed this often in the window is a regular ("Cumbia Night"
-// every Sunday), whatever its kind; its "headliner" is the night's name.
-const REGULAR_DATES = 3;
 
 const state = { running: false, startedAt: null, finishedAt: null, last: null };
 
@@ -85,13 +85,11 @@ export function prefetchQueue({ today = todayISO(), now = Date.now() } = {}) {
   const comedyEnd = addDays(today, COMEDY_DAYS - 1);
   const farEnd = addDays(today, FAR_DAYS - 1);
   const events = scoreEvents(queryEvents({ dateFrom: today, dateTo: farEnd }, { sort: 'date' }), now);
-
-  const datesBySeries = new Map();
-  for (const e of events) {
-    const series = seriesKey(e);
-    if (!datesBySeries.has(series)) datesBySeries.set(series, new Set());
-    datesBySeries.get(series).add(e.date);
-  }
+  // A regular ("Cumbia Night" every Sunday) is skipped whatever its kind: its
+  // "headliner" is the night's name. The day pages' own index decides, so a
+  // run of nights (Thu–Sat at the comedy club) isn't mistaken for one just
+  // because it has three dates.
+  const { regular } = regularsIndex(today);
 
   const headliners = events
     .map((e) => ({ e, name: e._lineup?.[0], key: artistKey(e._lineup?.[0]) }))
@@ -100,7 +98,7 @@ export function prefetchQueue({ today = todayISO(), now = Date.now() } = {}) {
 
   const best = new Map();
   for (const { e, name, key } of headliners) {
-    if (datesBySeries.get(seriesKey(e)).size >= REGULAR_DATES) continue;
+    if (regular.has(e.id)) continue;
     const kind = kindOf(e, { headlinerFound: statuses.get(key) === 'found' });
     let tier = null;
     let hint = null;
@@ -127,7 +125,9 @@ export function prefetchQueue({ today = todayISO(), now = Date.now() } = {}) {
 // The profile sources, with this run's circuit breakers in front: once Apple
 // answers 403 or 429 the run stops (the profile that hit it is saved as
 // partial and retried later), and after two Wikimedia 429s in a row Wikipedia
-// is skipped, leaving profiles partial so a later run fills them in.
+// is skipped, leaving profiles partial so a later run fills them in — only
+// those that would have asked it, though: a band MusicBrainz knows with no
+// Wikipedia link is complete without it.
 function guarded(sources, breakers) {
   return {
     ...sources,
@@ -141,7 +141,11 @@ function guarded(sources, breakers) {
       }
     },
     async wikipedia(...args) {
-      if (breakers.wikiOff) throw new Error('Wikipedia paused for this run');
+      if (breakers.wikiOff) {
+        const [mb, name, job] = args;
+        if (!wikipediaWouldAsk(mb, name, job?.hint)) return null;
+        throw new Error('Wikipedia paused for this run');
+      }
       try {
         const page = await sources.wikipedia(...args);
         breakers.wiki429 = 0;
@@ -221,10 +225,14 @@ export async function prefetchProfiles({
   state.startedAt = new Date().toISOString();
   try {
     const r = await run({ max, deadlineMs, today, now, sources });
+    // Apple backing us off is a planned pause, not a broken source: the
+    // lookup that ran into it doesn't count against the run (the note stays
+    // in error_msg for Settings), so the header doesn't flag it for hours.
+    const errors = r.errors - (r.stoppedBy === 'itunes' && r.errors ? 1 : 0);
     logRun({
       source: 'enrich',
       source_name: 'profiles',
-      status: r.fetched && !r.found && !r.partial && r.errors ? 'error' : 'ok',
+      status: errors && !r.found && !r.partial ? 'error' : 'ok',
       // Logged as found = profiles looked up, added = profiles with something to show.
       events_found: r.fetched,
       events_added: r.found + r.partial,

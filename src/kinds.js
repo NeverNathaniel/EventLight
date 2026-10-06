@@ -6,8 +6,8 @@
 // from Hamlet to karaoke, so the finer kinds are read from the title and the
 // source's own tags. Rules run in order and the first match wins. Band names
 // are the hazard ("Bingo Players", "Film School", "Pearl Jam"), so:
-//   - when the headliner is an artist MusicBrainz knows, their name is taken
-//     out of the title before the rules run, and a known act is Music;
+//   - when the headliner is an artist MusicBrainz knows, every act's name is
+//     taken out of the title before the rules run, and a known act is Music;
 //   - "jam" only counts with a qualifier ("jazz jam", "jam session");
 //   - every rule matches whole words.
 import { artistKey, isTribute } from './lineup.js';
@@ -84,12 +84,18 @@ function lineupOf(e) {
   }
 }
 
-// The title with the headliner's name taken out, so a known band's name can't
-// trip a rule. Matched on normalised words, so "The Jam" and "the jam" agree.
-function titleWithout(title, name) {
-  const t = ` ${artistKey(title)} `;
-  const n = artistKey(name);
-  return n ? t.replace(` ${n} `, ' ').trim() : t.trim();
+// The title with every billed act's name taken out, so a band's name can't
+// trip a rule — the support act's too ("Joyce Manor w/ Movie Star Junkies",
+// "Wet Leg w/ Black Market Karma"). The lineup parser already drops event
+// words ("Movie Night", "Trivia", "Open Mic") from the bill, so those stay in
+// the title. Matched on normalised words, so "The Jam" and "the jam" agree.
+function titleWithout(title, names) {
+  let t = ` ${artistKey(title)} `;
+  for (const name of names) {
+    const n = artistKey(name);
+    if (n) t = t.replace(` ${n} `, ' ');
+  }
+  return t.trim();
 }
 
 const make = (key, extra = {}) => ({ key, ...KINDS[key], ...extra });
@@ -100,7 +106,7 @@ const make = (key, extra = {}) => ({ key, ...KINDS[key], ...extra });
 export function kindOf(e, { headlinerFound = false } = {}) {
   if (e.kind === 'film') return make('film');
   const lineup = lineupOf(e);
-  const title = headlinerFound && lineup[0] ? titleWithout(e.title, lineup[0]) : String(e.title || '');
+  const title = headlinerFound && lineup[0] ? titleWithout(e.title, lineup) : String(e.title || '');
   const category = e.category || 'other';
   const comedyDomain = category === 'comedy' || COMEDY_WORDS_RE.test(e.title || '');
 
@@ -126,8 +132,8 @@ export function kindOf(e, { headlinerFound = false } = {}) {
 }
 
 // Which group a listing sits in on the day page: music, comedy, film or
-// around (everything else). Explore's filters use the source category the
-// same way, so a show is in the same place on both.
+// around (everything else). Explore's chips filter by this too (groupsOf in
+// annotate.js), so a show is in the same place on both.
 export function groupOf(e, kind = kindOf(e)) {
   if (kind.family === 'film') return 'film';
   if (kind.family === 'music') return 'music';
@@ -144,7 +150,8 @@ export function usesTitle(kind, lineup = []) {
   return kind.family === 'night' || kind.family === 'other';
 }
 
-const STATUS_PREFIX_RE = /^\s*(?:sold[\s-]?out|cancell?ed|postponed|rescheduled|just added|new date|on sale now)\s*[!:.\-–—|]*\s*/i;
+const STATUS_PREFIX_RE =
+  /^\s*(?:(?:almost|nearly)\s+sold[\s-]?out|sold[\s-]?out|low tickets|few tickets left|cancell?ed|postponed|rescheduled|just added|new date|on sale now)\s*[!:.\-–—|]*\s*/i;
 // The title as a headline: ticketing noise ("SOLD OUT!") belongs in a flag.
 export function cleanTitle(title) {
   let t = String(title || '');
@@ -157,14 +164,19 @@ export function cleanTitle(title) {
 // get One night only / Last chance / Opens from the film scoring instead.
 export const FLAG_ORDER = ['cancelled', 'sold-out', 'one-night', 'last-chance', 'opens', 'low-tix', 'release', 'free'];
 
+// "Almost sold out" and "nearly sold out" mean there are still tickets, so
+// they're Few left, not Sold out (which keeps a show out of the picks).
+const SOLD_OUT_RE = /(?<!\b(?:almost|nearly|not)\s+)\bsold[\s-]?out\b/i;
+const LOW_TIX_RE = /\blow tickets\b|\bfew tickets left\b|\b(?:almost|nearly)\s+sold[\s-]?out\b/i;
+
 export function flagsOf(e) {
   const title = String(e.title || '');
   const price = String(e.price_range || '');
   const flags = [];
   const cancelled = title.match(/\b(cancell?ed|postponed)\b/i);
   if (cancelled) flags.push({ key: 'cancelled', label: /^post/i.test(cancelled[1]) ? 'Postponed' : 'Cancelled' });
-  if (/\bsold[\s-]?out\b/i.test(title) || /\bsold[\s-]?out\b/i.test(price)) flags.push({ key: 'sold-out', label: 'Sold out' });
-  if (/\blow tickets\b|\bfew tickets left\b|\balmost sold out\b/i.test(title)) flags.push({ key: 'low-tix', label: 'Few left' });
+  if (SOLD_OUT_RE.test(title) || SOLD_OUT_RE.test(price)) flags.push({ key: 'sold-out', label: 'Sold out' });
+  if (LOW_TIX_RE.test(title) || LOW_TIX_RE.test(price)) flags.push({ key: 'low-tix', label: 'Few left' });
   if (/\b(?:album|record|ep|single) release\b/i.test(title)) flags.push({ key: 'release', label: 'Release show' });
   // "Free Throw" is a band, so a bare "free" in a title doesn't count.
   if (/^\s*free\b|\bno cover\b|^\s*\$0(?:\.00)?\s*$/i.test(price) || /\bfree (?:show|admission|entry|event|concert)\b|\(free\)|\bno cover\b/i.test(title)) {
@@ -183,13 +195,19 @@ const DATE_RE = new RegExp(`\\b(?:${MONTHS})\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,
 const TIME_RE = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi;
 const WEEKDAY = '(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day)?s?';
 const EDGE_WEEKDAY_RE = new RegExp(`^(?:(?:every|each)\\s+)?${WEEKDAY}\\b\\s*|\\s*\\b${WEEKDAY}$`, 'g');
-const NOISE_RE = /\b(?:sold out|cancell?ed|postponed|rescheduled|just added|new date|on sale now|early show|late show|matinee|all ages|21|18)\b/g;
+const NOISE_RE = /\b(?:(?:almost |nearly )?sold out|cancell?ed|postponed|rescheduled|just added|new date|on sale now|early show|late show|matinee|all ages|21|18)\b/g;
+
+// A night's host or guest changes from week to week ("Comedy Open Mic hosted
+// by Jen Ray", "Trivia w/ Sam Lee"), so for nights the tail is dropped.
+const GUEST_TAIL_RE = /\s+(?:hosted\s+by|with|featuring|feat\.?|ft\.)\s+.*$|\s+w\/.*$/i;
 
 // A title with the parts that change from week to week taken out:
 // "Trivia Night #12 – Thursday, Oct 9" and "Trivia Night #13 – Thursday,
-// Oct 16" both become "trivia night".
-export function titleStem(title) {
-  let t = String(title || '')
+// Oct 16" both become "trivia night". `night` also drops a host or guest.
+export function titleStem(title, { night = false } = {}) {
+  let t = String(title || '');
+  if (night) t = t.replace(GUEST_TAIL_RE, '');
+  t = t
     .replace(/#\s*\d+/g, ' ')
     .replace(/\bvol(?:ume)?\.?\s*\d+/gi, ' ')
     .replace(/\b(?:part|pt|episode|ep|week|night|round|no)\.?\s*\d+\b/gi, ' ')
@@ -203,6 +221,6 @@ export function titleStem(title) {
 }
 
 // The same night at the same venue, whatever its date.
-export function seriesKey(e) {
-  return `${artistKey(e.venue)}|${titleStem(e.title)}`;
+export function seriesKey(e, kind = kindOf(e)) {
+  return `${artistKey(e.venue)}|${titleStem(e.title, { night: kind.family === 'night' })}`;
 }

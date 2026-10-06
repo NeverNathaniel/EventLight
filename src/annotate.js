@@ -6,7 +6,10 @@
 //
 // Order matters: the feel line names a film's flag and a curated reason, and
 // the pick score reads the feel (is the act known, is a comedian notable).
+import db from './db/index.js';
+import { parseLineupColumn } from './db/artists.js';
 import { kindOf, groupOf, usesTitle, cleanTitle, flagsOf, sortFlags } from './kinds.js';
+import { artistKey } from './lineup.js';
 import { loadFacts, attachFeel, headlinerFound } from './feel.js';
 import { filmScore, pickScore, regularsIndex, loadCurated } from './curation.js';
 import { buildContext } from './scoring/engine.js';
@@ -49,4 +52,23 @@ export function annotate(items, {
   attachFeel(items, { facts });
   for (const item of items) item._pick = pickScore(item);
   return items;
+}
+
+const foundIn = db.prepare(
+  "SELECT artist_key FROM artists WHERE status = 'found' AND artist_key IN (SELECT value FROM json_each(?))"
+);
+
+// The day page's group (music, comedy, film or around) for each of a list of
+// event rows, in order — what annotate() puts in _group, without the rest of
+// the dressing, so Explore can filter a whole result set before paging it.
+// Which headliners MusicBrainz knows is read in one query.
+export function groupsOf(rows) {
+  const lineups = rows.map((r) => (Array.isArray(r._lineup) ? r._lineup : parseLineupColumn(r.lineup)));
+  const heads = [...new Set(lineups.map((l) => (l[0] ? artistKey(l[0]) : null)).filter(Boolean))];
+  const found = new Set(heads.length ? foundIn.all(JSON.stringify(heads)).map((r) => r.artist_key) : []);
+  return rows.map((r, i) => {
+    const item = { ...r, _lineup: lineups[i] };
+    const head = lineups[i][0];
+    return groupOf(item, kindOf(item, { headlinerFound: Boolean(head) && found.has(artistKey(head)) }));
+  });
 }

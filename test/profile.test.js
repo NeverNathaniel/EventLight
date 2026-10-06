@@ -218,6 +218,32 @@ test('Wikipedia by name: a performer page is taken, a namesake is turned away', 
   assert.deepEqual(asked, ['Ali Siddiq', 'Ali Siddiq (comedian)']);
 });
 
+test("Wikipedia by name: for a comedian, a singer's, comic-book artist's or producer's page is a namesake", async () => {
+  const pages = {
+    'Sam Smith': page('English singer-songwriter (born 1992)'),
+    'Sam Smith (comedian)': page('American stand-up comedian'),
+    'Dan Parent': page('American comic book artist'),
+    'Joe Roth': page('American film producer'),
+    'Joe Roth (comedian)': page('American comedian and podcaster'),
+    'Tig Notaro': page('American comedian, writer and actress (born 1971)'),
+  };
+  const asked = [];
+  const summary = async (title) => {
+    asked.push(title);
+    return pages[title] || null;
+  };
+  assert.equal((await wikipediaByName('Sam Smith', 'comedy', summary)).description, 'American stand-up comedian');
+  assert.deepEqual(asked, ['Sam Smith', 'Sam Smith (comedian)'], 'the real "(comedian)" page is still tried');
+  asked.length = 0;
+  assert.equal(await wikipediaByName('Dan Parent', 'comedy', summary), null, '"comic book artist" is not a comic');
+  assert.deepEqual(asked, ['Dan Parent', 'Dan Parent (comedian)']);
+  assert.equal((await wikipediaByName('Joe Roth', 'comedy', summary)).description, 'American comedian and podcaster');
+  // A comedian's own page, however long its description, is taken first time.
+  asked.length = 0;
+  assert.equal((await wikipediaByName('Tig Notaro', 'comedy', summary)).description, 'American comedian, writer and actress (born 1971)');
+  assert.deepEqual(asked, ['Tig Notaro']);
+});
+
 // Every outbound request answered from a table, so the real fetchers run
 // without the network. Unknown URLs are a 404.
 function stubHttp(routes) {
@@ -309,6 +335,71 @@ test("Apple: the artist MusicBrainz links to is recorded as an 'mb' match, ahead
     // Through the shared limits: the two MusicBrainz calls 1.1 s apart, the
     // two Wikimedia ones (Wikidata, then the page) 250 ms apart.
     assert.deepEqual(slept, [1100, 250]);
+  } finally {
+    http.restore();
+    limits.setClock();
+  }
+});
+
+// MusicBrainz knows "Static Saints" and links their Apple id 111.
+const SAINTS_MB = {
+  id: 'saints-mbid',
+  name: 'Static Saints',
+  type: 'Group',
+  area: { name: 'Seattle' },
+  'life-span': { begin: '2015' },
+  relations: [{ type: 'streaming', url: { resource: 'https://music.apple.com/us/artist/static-saints/111' } }],
+};
+const appleArtist = (artistId, primaryGenreName) => ({
+  wrapperType: 'artist', artistId, artistName: 'Static Saints', primaryGenreName,
+  artistLinkUrl: `https://music.apple.com/us/artist/static-saints/${artistId}?uo=4`,
+});
+const isLookup = (id, entity) => (url, params) =>
+  url.startsWith('https://itunes.apple.com/lookup') && String(params.id) === String(id) && params.entity === entity;
+
+function saintsHttp({ linked }) {
+  return stubHttp([
+    [(url) => url === 'https://musicbrainz.org/ws/2/artist', { artists: [{ id: 'saints-mbid', name: 'Static Saints', score: 100, tags: [] }] }],
+    [(url) => url.startsWith('https://musicbrainz.org/ws/2/artist/'), SAINTS_MB],
+    // Apple's artist search only turns up a namesake, a Christian act.
+    [isItunes('musicArtist'), { results: [appleArtist(999, 'Christian')] }],
+    [isLookup(111), { results: linked ? [appleArtist(111, 'Punk')] : [] }],
+    [isItunes('song'), (url, params) => ({
+      results: params.term === 'Static Saints'
+        ? [song(999, 'Worship Song'), song(111, 'Static'), song(111, 'Saints'), song(111, 'Feedback')]
+        : [],
+    })],
+    [(url) => url.includes('listenbrainz'), []],
+  ]);
+}
+
+test("Apple: when the search only finds a namesake, the id MusicBrainz links is looked up instead", async () => {
+  fakeClock();
+  const http = saintsHttp({ linked: true });
+  try {
+    const p = await artistProfile('Static Saints', { force: true });
+    assert.equal(p.apple.url, 'https://music.apple.com/us/artist/static-saints/111');
+    assert.equal(p.apple.genre, 'Punk');
+    assert.equal(p.apple.match, 'mb');
+    assert.deepEqual(p.apple.songs.map((x) => x.title), ['Static', 'Saints', 'Feedback']);
+    assert.ok(http.asked.some((u) => u.startsWith('https://itunes.apple.com/lookup')));
+  } finally {
+    http.restore();
+    limits.setClock();
+  }
+});
+
+test("Apple: a namesake that disagrees with MusicBrainz's link, which Apple no longer knows, is a 'conflict'", async () => {
+  fakeClock();
+  const http = saintsHttp({ linked: false });
+  try {
+    const p = await artistProfile('Static Saints', { force: true });
+    // Kept for the sheet, but rows won't play it or take its genre (src/feel.js).
+    assert.equal(p.apple.match, 'conflict');
+    assert.equal(p.apple.genre, 'Christian');
+    // …and its album art isn't the band's photo.
+    assert.ok(p.apple.songs[0].artwork, 'the songs have artwork to borrow');
+    assert.equal(p.image, null);
   } finally {
     http.restore();
     limits.setClock();

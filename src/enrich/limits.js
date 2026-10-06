@@ -6,7 +6,8 @@
 //
 //   MusicBrainz  about one request a second
 //   iTunes       about 20 a minute before Apple starts answering 403; we
-//                keep to 18, and the background leaves a few for the sheet
+//                keep to 18 in any 60 s, and the background leaves the
+//                last 4 of those for the sheet
 //   Wikimedia    no hard limit, but bursts get 429s
 //
 // The sheet comes first: while a foreground lookup is in flight, background
@@ -16,8 +17,10 @@ import { sleep as realSleep } from '../config.js';
 const MB_GAP_MS = 1100;
 const WIKI_GAP_MS = 250;
 export const ITUNES_PER_MIN = 18;
-// The background only takes an iTunes token while at least this many are
-// left, so an artist sheet opened mid-prefetch never waits for one.
+const ITUNES_WINDOW_MS = 60000;
+// The background only takes an iTunes call while at least this many of the
+// minute's are left, so an artist sheet opened mid-prefetch (three or four
+// calls) never waits.
 const ITUNES_RESERVE = 4;
 
 // Tests swap in a fake clock so nothing waits on real time.
@@ -89,44 +92,45 @@ function gapLimiter(gapMs) {
 export const mbTurn = gapLimiter(MB_GAP_MS);
 export const wikiTurn = gapLimiter(WIKI_GAP_MS);
 
-// iTunes is a token bucket rather than a gap: a sheet's three or four calls
-// can go at once, and the bucket refills at 18 a minute.
-const bucket = { tokens: ITUNES_PER_MIN, at: null };
+// iTunes keeps a log of the last minute's calls rather than a gap, so a
+// sheet's three or four calls can go at once. (It was a token bucket, but a
+// full bucket plus its refill let a fresh prefetch make about 32 calls in its
+// first minute, well past where Apple starts saying no.) A call goes when
+// fewer than 18 were made in the last 60 s — 14 for the background — so no
+// 60 s window ever holds more than 18.
+const itunesLog = [];
 
-function refill() {
-  const now = clock.now();
-  if (bucket.at != null) {
-    bucket.tokens = Math.min(ITUNES_PER_MIN, bucket.tokens + ((now - bucket.at) * ITUNES_PER_MIN) / 60000);
-  }
-  bucket.at = now;
+function itunesRecent(now) {
+  while (itunesLog.length && now - itunesLog[0] >= ITUNES_WINDOW_MS) itunesLog.shift();
+  return itunesLog.length;
 }
 
 export async function itunesTurn(opts = {}) {
   for (;;) {
     await yieldToForeground(opts);
-    refill();
-    const floor = opts.background ? ITUNES_RESERVE : 1;
-    if (bucket.tokens >= floor) {
-      bucket.tokens -= 1;
+    const now = clock.now();
+    const limit = opts.background ? ITUNES_PER_MIN - ITUNES_RESERVE : ITUNES_PER_MIN;
+    const recent = itunesRecent(now);
+    if (recent < limit) {
+      itunesLog.push(now);
       return;
     }
-    // Wait for enough of the bucket to refill, then check again (a sheet
-    // may have opened, or taken the token, in the meantime).
-    await clock.sleep(Math.ceil(((floor - bucket.tokens) * 60000) / ITUNES_PER_MIN));
+    // Wait until enough of the oldest calls are a minute old, then check
+    // again (a sheet may have opened, or taken the slot, in the meantime).
+    await clock.sleep(Math.max(1, itunesLog[recent - limit] + ITUNES_WINDOW_MS - now));
   }
 }
 
+// How many iTunes calls could go right now.
 export function itunesTokens() {
-  refill();
-  return bucket.tokens;
+  return Math.max(0, ITUNES_PER_MIN - itunesRecent(clock.now()));
 }
 
-// For tests: a full bucket, free slots, nothing in flight.
+// For tests: no recent calls, free slots, nothing in flight.
 export function resetLimits() {
   mbTurn.reset();
   wikiTurn.reset();
-  bucket.tokens = ITUNES_PER_MIN;
-  bucket.at = null;
+  itunesLog.length = 0;
   inFlight = 0;
   wake();
 }
