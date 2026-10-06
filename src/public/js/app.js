@@ -24,7 +24,7 @@ const state = {
   morePicks: false,
   day: null,
   dayData: null,
-  dayFrom: null, // 'week' | 'explore' when the day page was opened from inside the app
+  dayTarget: null, // a section to scroll to once the day page draws ('g-film')
   open: new Set(), // day-page folds the person opened (groups, regulars, started)
   scroll: {},
   saved: null,
@@ -77,7 +77,8 @@ function addDays(iso, n) {
   d.setDate(d.getDate() + n);
   return localISO(d);
 }
-const isISODate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && !Number.isNaN(toDate(s).getTime());
+// A real calendar date: "2026-11-31" doesn't survive the round trip.
+const isISODate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && localISO(toDate(s)) === s;
 const dow = (iso) => toDate(iso).toLocaleDateString('en-US', { weekday: 'short' });
 const weekday = (iso) => toDate(iso).toLocaleDateString('en-US', { weekday: 'long' });
 const dayNum = (iso) => toDate(iso).getDate();
@@ -148,7 +149,8 @@ const kindInfo = (e) => e._kind || FALLBACK_KIND[kindOf(e)] || { label: 'Event',
 function kindTag(e, { plain = false } = {}) {
   const k = kindInfo(e);
   if (plain) return `<span class="tk-kind">${esc(k.label)}</span>`;
-  return `<span class="kind k-${esc(k.family)}${e._regular ? ' reg' : ''}">${esc(k.label)}</span>`;
+  // A comedy open mic wears comedy's colors; dashed like any regular.
+  return `<span class="kind k-${esc(k.domain || k.family)}${e._regular ? ' reg' : ''}">${esc(k.label)}</span>`;
 }
 
 // A film's one line: "Drama · 1984 · 2h 25m · MC 88".
@@ -219,10 +221,11 @@ function metaLine(e) {
   const times = e._times?.length > 1 ? e._times.map(fmtTime).join(' & ') : '';
   // "Free" in the price already says it.
   const flag = (e._flags || []).find((f) => !(f.key === 'free' && /free/i.test(e.price_range || '')));
+  // Your plan leads, so on a narrow phone it's the venue that gets cut short.
   return [
-    esc([e.venue, e.city, times, e.price_range].filter(Boolean).join(' · ')),
-    flag ? `<b class="flag">${esc(flag.label)}</b>` : '',
     planText(e),
+    flag ? `<b class="flag">${esc(flag.label)}</b>` : '',
+    esc([e.venue, e.city, times, e.price_range].filter(Boolean).join(' · ')),
   ].filter(Boolean).join(' · ');
 }
 
@@ -311,6 +314,7 @@ function ticket(e, { role = '' } = {}) {
       <span class="tk-time">${time || '—'}</span>${kindTag(e, { plain: true })}
     </div>
     <button class="tk-main" data-open="${film ? 'film' : 'event'}" data-key="${esc(e.id)}">
+      <span class="sr-only">${esc(kindInfo(e).label)}, ${esc(shortDate(e.date))}. </span>
       <span class="tk-when">${esc(when)}</span>
       <span class="tk-title">${esc(headline(e))}</span>
       ${lines.join('')}
@@ -330,6 +334,7 @@ function furtherCard(e) {
     <span class="fc-date">${esc(kindInfo(e).label)} · ${esc(shortDate(e.date))}</span>
     <span class="fc-name">${esc(headline(e))}</span>
     ${tags ? `<span class="fc-tags">${esc(tags)}</span>` : ''}
+    ${e._feel?.link ? `<span class="fc-why">${linkLine(e)}</span>` : ''}
     <span class="fc-ven">${esc([e.venue, e.city].filter(Boolean).join(' · '))}</span>
   </button>`;
 }
@@ -424,7 +429,7 @@ function regularLine(e) {
 function renderDay() {
   const d = state.dayData;
   if (!d || d.date !== state.day) return '<p class="loading">Loading…</p>';
-  const back = `<button class="backlink" data-act="day-back">‹ ${state.dayFrom === 'explore' ? 'Explore' : 'Week'}</button>`;
+  const back = `<button class="backlink" data-act="day-back">‹ ${dayOrigin() === 'explore' ? 'Explore' : 'Week'}</button>`;
   const name = dayName(d.date);
   const pickHead = d.picks.length
     ? `Top picks ${forDay(d.date)}`
@@ -452,8 +457,10 @@ function renderDay() {
   const left = d.groups.filter((g) => g.key === 'film').map(group).join('');
   const right = d.groups.filter((g) => g.key !== 'film').map(group).join('');
   const regKinds = [...new Set(d.regulars.map((e) => kindInfo(e).label.toLowerCase()))].join(', ');
+  // On a regulars-only day the fold starts open; tapping it still closes it.
+  const regularsFirst = !d.picks.length && d.picksLabel === 'regulars';
   const regulars = d.regulars.length
-    ? fold('regulars', state.open.has('regulars') || (!d.picks.length && d.picksLabel === 'regulars'),
+    ? fold('regulars', regularsFirst !== state.open.has('regulars'),
       `<span>Every week · ${d.regulars.length}</span><span class="fold-k">${esc(regKinds)}</span>`,
       d.regulars.map(regularLine).join(''))
     : '';
@@ -471,12 +478,12 @@ function renderDay() {
       ${back}
       <p class="d-eye">${esc(shortDate(d.date))}</p>
       <h1 class="title" tabindex="-1" id="day-title">${esc(name)}</h1>
-      ${d.dek ? `<p class="dek">${esc(d.dek)}</p>` : ''}
+      ${d.dek && d.counts.total ? `<p class="dek">${esc(d.dek)}</p>` : ''}
       ${d.counts.total ? `<p class="range">${esc(countsLine(d.counts))}</p>` : ''}
       ${strip(d.strip, { current: d.date, today: d.today })}
     </header>
     <div class="d-left">
-      <section class="d-picks"><h2 class="h">${esc(pickHead)}</h2>${picks}${pickNote}</section>
+      <section class="d-picks">${d.counts.total ? `<h2 class="h">${esc(pickHead)}</h2>` : ''}${picks}${pickNote}</section>
       ${plans}
       ${left}
     </div>
@@ -517,7 +524,8 @@ function renderExplore() {
 // planning around get their own rows; the rest fold into one line.
 function exploreFilms(date) {
   const list = state.explore.films[date] || [];
-  const rows = list.filter((f) => f.special || f._film?.eligible);
+  // Films you searched for are all listed.
+  const rows = state.explore.q ? list : list.filter((f) => f.special || f._film?.eligible);
   const rest = list.filter((f) => !rows.includes(f));
   return { rows, line: filmsLink(date, rest.length, []) };
 }
@@ -531,7 +539,8 @@ function renderResults() {
   if (!x.events.length && !filmDates.length) {
     return '<div class="empty"><strong>Nothing matches</strong>Try another search or city. <button class="linkbtn" data-act="x-clear">Clear filters</button></div>';
   }
-  const count = `<div class="count">${x.total} upcoming ${x.total === 1 ? 'show' : 'shows'}</div>`;
+  const films = x.q ? Object.values(x.films || {}).flat().length : 0;
+  const count = `<div class="count">${x.total} upcoming ${x.total === 1 ? 'show' : 'shows'}${films ? ` · ${films} ${films === 1 ? 'film showing' : 'film showings'}` : ''}</div>`;
   let body;
   if (x.sort === 'relevance') {
     body = x.events.map((e) => row(e, { day: true })).join('');
@@ -979,12 +988,13 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
 }
 
-async function changePlan(id, target) {
+// Going / Maybe toggles. What's on screen decides: tapping a pressed button
+// clears the plan, so a plan changed on the other phone can't be re-set by
+// a stale copy here.
+async function changePlan(id, target, pressed) {
   const copies = shown.get(id);
-  const e = copies && [...copies][0];
-  if (!e) return;
-  const current = e.going ? 'going' : e.interested ? 'maybe' : null;
-  const plan = current === target ? null : target;
+  if (!copies) return;
+  const plan = pressed ? null : target;
   try {
     await post(`/api/events/${id}/plan`, { plan });
   } catch {
@@ -999,10 +1009,33 @@ async function changePlan(id, target) {
   const y = window.scrollY;
   render();
   window.scrollTo(0, y);
-  if (sheet.stack.length) renderSheet();
-  // Plans change the picks (a Going show leads its day), so the screen's
-  // data is fetched again; the page keeps its place.
-  load({ quiet: true });
+  if (sheet.stack.length) await renderSheet();
+  refocus(`[data-plan="${target}"][data-id="${id}"]`);
+  // Plans change the picks (a Going show leads its day), so the Week, a day
+  // and Saved fetch their data again, keeping their place. Explore's order
+  // doesn't depend on plans, and refetching would drop the pages you loaded.
+  if (state.route !== 'explore') load({ quiet: true });
+}
+
+// A selector for the focused control on the page, so a quiet redraw can put
+// focus back on its new copy.
+function focusSelector() {
+  const el = document.activeElement;
+  if (!el || !view.contains(el)) return null;
+  const d = el.dataset;
+  const q = (v) => CSS.escape(v || '');
+  if (d.plan) return `[data-plan="${q(d.plan)}"][data-id="${q(d.id)}"]`;
+  if (d.open) return `[data-open="${q(d.open)}"][data-key="${q(d.key)}"]`;
+  if (d.act) return `[data-act="${q(d.act)}"]${d.key ? `[data-key="${q(d.key)}"]` : ''}`;
+  if (d.day) return `[data-day="${q(d.day)}"]`;
+  return null;
+}
+
+// Put focus back on a control after a redraw replaced it (the sheet's copy
+// first, when the sheet is open).
+function refocus(selector) {
+  const el = (sheet.stack.length && sheetEl.querySelector(selector)) || view.querySelector(selector);
+  el?.focus({ preventScroll: true });
 }
 
 async function hideEvent(id) {
@@ -1013,6 +1046,8 @@ async function hideEvent(id) {
     return;
   }
   toast('Hidden. Settings → Clear hidden brings it back.');
+  // Explore is redrawn from memory when you go back to it.
+  state.explore.events = state.explore.events.filter((e) => e.id !== id);
   closeSheet();
   load({ quiet: true });
 }
@@ -1077,10 +1112,14 @@ async function copyFeed() {
 }
 
 // ── Explore loading ─────────────────────────────────────────────────────────
+// Explore's chips group listings the way the day page does (a talk at a
+// music venue is under Around town on both).
+const EXPLORE_GROUP = { music: 'music', comedy: 'comedy', other: 'around' };
+
 function exploreParams() {
   const x = state.explore;
   const p = new URLSearchParams();
-  if (['music', 'comedy', 'other'].includes(x.type)) p.set('category', x.type);
+  if (EXPLORE_GROUP[x.type]) p.set('group', EXPLORE_GROUP[x.type]);
   if (x.city !== 'all') p.set('city', x.city);
   if (x.q) p.set('search', x.q);
   return p;
@@ -1103,8 +1142,9 @@ async function loadExploreResults({ append = false } = {}) {
   p.set('sort', x.sort);
   p.set('page', String(x.page));
   p.set('pageSize', '60');
-  // Films come along with "Everything" by date, a page's worth of days at a time.
-  const withFilms = x.type === 'all' && x.sort === 'date' && !x.q;
+  // Films come along with "Everything" by date, a page's worth of days at a
+  // time — and with a search, the films that match it.
+  const withFilms = x.type === 'all' && x.sort === 'date';
   if (withFilms) {
     p.set('withFilms', '1');
     if (append && x.filmsTo) p.set('filmsFrom', addDays(x.filmsTo, 1));
@@ -1152,17 +1192,21 @@ async function loadSaved() {
   state.curated = curated;
 }
 
+// Fetch a day's page. False when you've moved to another day meanwhile, so
+// a slow answer never replaces the day on screen.
 async function loadDay() {
   const date = state.day;
   const d = await api(`/api/views/day?date=${encodeURIComponent(date)}`);
+  if (state.route !== 'day' || state.day !== date) return false;
   state.today = d.today;
   // A past day shows today's page, under today's address.
-  if (d.date !== date && state.day === date) {
+  if (d.date !== date) {
     state.day = d.date;
     state.hash = `#day/${d.date}`;
-    history.replaceState(null, '', state.hash);
+    history.replaceState(history.state, '', state.hash);
   }
   state.dayData = d;
+  return true;
 }
 
 // Fetch the current screen's data and draw it. `quiet` keeps what's on
@@ -1176,7 +1220,7 @@ async function load({ quiet = false } = {}) {
       state.brief = brief;
       state.today = brief.today;
     } else if (r === 'day') {
-      await loadDay();
+      if (!(await loadDay())) return;
     } else if (r === 'explore') {
       if (!state.facets.cities.length) state.facets = await api('/api/filters').catch(() => state.facets);
       state.explore.page = 1;
@@ -1188,18 +1232,34 @@ async function load({ quiet = false } = {}) {
     if (!quiet) view.innerHTML = '<div class="empty"><strong>Can’t reach EventLight</strong>Check that the server is running, then reload.</div>';
     return;
   }
-  if (state.hash !== hash && !(r === 'day' && state.route === 'day')) return;
+  if (state.route !== r || (r !== 'day' && state.hash !== hash)) return;
   const y = window.scrollY;
+  const keep = quiet ? focusSelector() : null;
   render();
-  if (quiet) window.scrollTo(0, y);
-  else if (r === 'day') document.getElementById('day-title')?.focus({ preventScroll: true });
+  if (quiet) {
+    window.scrollTo(0, y);
+    if (keep) view.querySelector(keep)?.focus({ preventScroll: true });
+  } else if (r === 'day') {
+    document.getElementById('day-title')?.focus({ preventScroll: true });
+    // "At the movies: …" lands on the films, not the top of the page.
+    if (state.dayTarget) document.getElementById(state.dayTarget)?.scrollIntoView();
+    state.dayTarget = null;
+  }
 }
 
+// Where a day page's "‹ Week" / "‹ Explore" goes: kept on the day's own
+// history entry when the Week or Explore opened it, so Back and Forward
+// can't leave it pointing somewhere else.
+const dayOrigin = () => history.state?.from || null;
+let openedFrom = null; // set by a tap on a day link inside the app
+
 // Move to another day from a day page. It replaces the address rather than
-// adding to history, so Back still returns to where you came from.
+// adding to history (keeping where the day was opened from), so Back still
+// returns to where you came from.
 function goDay(date) {
   if (!isISODate(date)) return;
-  location.replace(`#day/${date}`);
+  history.replaceState(history.state, '', `#day/${date}`);
+  route();
 }
 
 function route() {
@@ -1211,13 +1271,13 @@ function route() {
   closeSheet();
   if (m) {
     const date = m[1] === 'today' ? state.today : m[1] === 'tomorrow' ? addDays(state.today, 1) : m[1];
-    if (m[1] !== date) {
-      location.replace(`#day/${date}`);
+    // "today", "tomorrow" and dates that don't exist get a real address.
+    if (m[1] !== date || !isISODate(date)) {
+      location.replace(`#day/${isISODate(date) ? date : state.today}`);
       return;
     }
-    // Opened from the Week or Explore, "‹ Week" goes back there; moving from
-    // day to day keeps it.
-    if (state.route !== 'day') state.dayFrom = prev && ['week', 'explore'].includes(state.route) ? state.route : null;
+    if (openedFrom) history.replaceState({ from: openedFrom }, '');
+    openedFrom = null;
     if (state.day !== date) state.open = new Set();
     state.route = 'day';
     state.day = date;
@@ -1266,11 +1326,25 @@ document.addEventListener('click', (ev) => {
     closeSheet();
     return;
   }
+  // A link to a day page: remember where it was opened from (for "‹ Week"),
+  // and which section a films line points at. A link to the day you're on
+  // (the sheet's "See the whole day") just closes the sheet.
+  const dayLink = ev.target.closest('a[href^="#day/"]');
+  if (dayLink) {
+    if (dayLink.getAttribute('href') === location.hash) {
+      ev.preventDefault();
+      closeSheet();
+      return;
+    }
+    openedFrom = ['week', 'explore'].includes(state.route) ? state.route : null;
+    if (dayLink.classList.contains('filmline')) state.dayTarget = 'g-film';
+    return;
+  }
   const btn = ev.target.closest('button');
   if (!btn || btn.disabled) return;
   const { plan, id, open, key, act, day, hint } = btn.dataset;
   if (plan) {
-    changePlan(Number(id), plan);
+    changePlan(Number(id), plan, btn.getAttribute('aria-pressed') === 'true');
     return;
   }
   if (day) {
@@ -1290,7 +1364,7 @@ document.addEventListener('click', (ev) => {
     case 'play': playPreview(decodeURIComponent(key)); break;
     case 'morepicks': state.morePicks = !state.morePicks; render(); break;
     case 'day-back':
-      if (state.dayFrom) history.back();
+      if (dayOrigin()) history.back();
       else location.hash = '#week';
       break;
     case 'fold': {
@@ -1299,6 +1373,7 @@ document.addEventListener('click', (ev) => {
       const y = window.scrollY;
       render();
       window.scrollTo(0, y);
+      refocus(`[data-act="fold"][data-key="${key}"]`);
       break;
     }
     case 'hide': hideEvent(Number(id)); break;
@@ -1365,9 +1440,11 @@ document.addEventListener('keydown', (ev) => {
   // ← / → step through days on a day page (not while typing or in the sheet).
   if (state.route !== 'day' || sheet.stack.length || ev.altKey || ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
   if (ev.target.closest?.('input, select, textarea')) return;
+  // Only from the day on screen, so a quick second press can't skip a day.
   const d = state.dayData;
-  if (ev.key === 'ArrowLeft' && d?.prev) goDay(d.prev.date);
-  if (ev.key === 'ArrowRight' && d?.next) goDay(d.next.date);
+  if (!d || d.date !== state.day) return;
+  if (ev.key === 'ArrowLeft' && d.prev) goDay(d.prev.date);
+  if (ev.key === 'ArrowRight' && d.next) goDay(d.next.date);
 });
 
 window.addEventListener('hashchange', route);
