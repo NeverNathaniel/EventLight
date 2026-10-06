@@ -145,6 +145,8 @@ Copy `.env.example` to `.env` and fill in what you have. You can also paste keys
 | `PUBLIC_URL` | Where you open EventLight (e.g. `http://nas.local:3000`); tapping the digest opens it |
 | `HOME_CITY` / `HOME_BOOST` | Defaults for **Close to Home**: your home city (default `Tacoma`) and the boost for shows near it, in percent (`0`, `25`, `50` or `100`; default `50`). Settings overrides both |
 | `ENRICH_MAX_LOOKUPS` | API calls the enrichment step may spend per refresh (default `150`, ~1/sec) — results are cached, so later refreshes only look up new artists |
+| `PROFILE_PREFETCH` | `true` (default) to look up the coming headliners' artist profiles (description, top song preview) in the background after each refresh, so rows can say what an act is before you open it; `false` to look profiles up only when you open an artist |
+| `PROFILE_PREFETCH_MAX` | Artist profiles the background lookup may fetch per refresh (default `40`; Apple's limit makes that about six minutes) — results are cached for 30 days |
 
 > API keys are **never** hardcoded — they're read from `.env` exclusively. The Settings page reports only whether each key is configured, never its value.
 
@@ -282,11 +284,11 @@ Scores are computed at query time and used for **Top picks** and Explore's **Bes
 **Artist pages** (`src/enrich/profile.js`). The first time you open an artist, EventLight looks them up and caches the result in SQLite (`artist_profiles`) for 30 days. All of the sources are free and need no key:
 
 - [MusicBrainz](https://musicbrainz.org/): solo artist or band, hometown, year formed, a one-line description, and links: their website, Bandcamp, Spotify, YouTube, and their Apple Music id, which picks the right artist on Apple when two share a name.
-- [Wikipedia](https://en.wikipedia.org/), through the Wikidata link: a one-paragraph bio and a photo.
+- [Wikipedia](https://en.wikipedia.org/), through the Wikidata link: a one-paragraph bio and a photo. A comedian MusicBrainz doesn't know is looked up by name ("Name", then "Name (comedian)"), and the page is only used when its short description says they perform. Bands aren't looked up by name: one MusicBrainz doesn't know is usually local, and a page under its name is more likely another band's.
 - Apple's [iTunes Search API](https://performance-partners.apple.com/search-api): the Apple Music page and up to five top songs, most popular first, each with Apple's 30-second preview to play in the page. The Apple Music button opens the Music app for full songs.
 - [ListenBrainz](https://listenbrainz.org/): similar artists, when there isn't a list for them already.
 
-The first lookup takes a few seconds. The sheet shows what EventLight already knows straight away and fills in the rest when it arrives. If a source fails or is rate-limited, the profile is saved as partial and re-checked within the hour, and a re-check never wipes what an earlier lookup found.
+Profiles for the coming weeks' acts are also looked up in the background after each refresh (see [Curation](#curation)), so most listings can show a description and a song before anyone opens them. Otherwise the first lookup takes a few seconds: the sheet shows what EventLight already knows straight away and fills in the rest when it arrives. If a source fails or is rate-limited, the profile is saved as partial and re-checked within the hour, and a re-check never wipes what an earlier lookup found.
 
 **Sounds like** compares each artist's similar-artist list with each favorite's, by cosine similarity with inverse-document-frequency weighting. That catches direct links (an act on a favorite's list) and shared-fan links (Movements' listeners also play Joyce Manor and Modern Baseball, both close to PUP), while hub artists that sit on every list — Radiohead, The Beatles — count for little.
 

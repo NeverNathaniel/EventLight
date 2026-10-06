@@ -2,6 +2,7 @@
 import express from 'express';
 import { getStatus, getRecentLogs, countEvents } from '../db/queries.js';
 import { getSchedulerState } from '../scheduler/cron.js';
+import { prefetchState } from '../enrich/prefetch.js';
 
 const router = express.Router();
 
@@ -11,10 +12,12 @@ router.get('/status', (req, res) => {
     scheduler: getSchedulerState(),
     totalEvents: countEvents({ showHidden: true }),
     sources,
-    lastRunAt: sources.reduce(
-      (latest, s) => (s.run_at > (latest || '') ? s.run_at : latest),
-      null
-    ),
+    // When the listings were last refreshed. The background artist lookups
+    // run on for a few minutes after a refresh and don't count.
+    lastRunAt: sources
+      .filter((s) => s.source_name !== 'profiles')
+      .reduce((latest, s) => (s.run_at > (latest || '') ? s.run_at : latest), null),
+    profiles: prefetchState(),
   });
 });
 

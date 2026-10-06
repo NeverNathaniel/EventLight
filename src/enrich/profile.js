@@ -6,24 +6,30 @@
 //
 //   MusicBrainz   type, hometown, year formed, links — including their Apple
 //                 Music id, which picks the right artist when names collide
-//   Wikipedia     a one-paragraph bio and a photo, through the Wikidata link
+//   Wikipedia     a one-paragraph bio and a photo, through the Wikidata link,
+//                 or by name for acts MusicBrainz doesn't link (comedians)
 //   Apple         their Apple Music page and top songs with previews (the
 //                 iTunes Search API; previews are Apple's own 30-second clips)
 //   ListenBrainz  similar artists, when we don't have their list already
+//
+// The week's headliners are also looked up in the background after each
+// refresh (src/enrich/prefetch.js). Every call goes through the shared rate
+// limits in src/enrich/limits.js, where a sheet someone is waiting on goes
+// first.
 import axios from 'axios';
 import { USER_AGENT, sleep } from '../config.js';
 import { artistKey } from '../lineup.js';
 import { safeHttpUrl } from '../adapters/util.js';
 import { lookupArtist } from './musicbrainz.js';
 import { similarArtists } from './listenbrainz.js';
+import { mbTurn, wikiTurn, itunesTurn, foreground, promote } from './limits.js';
 import { getArtist, getArtistProfile, saveArtistProfile, getSimilarFor } from '../db/artists.js';
 
 const MB_URL = 'https://musicbrainz.org/ws/2/artist';
 const ITUNES_URL = 'https://itunes.apple.com';
+const WIKI_SUMMARY_URL = 'https://en.wikipedia.org/api/rest_v1/page/summary';
 const MAX_SONGS = 5;
 const MAX_SIMILAR = 8;
-// MusicBrainz allows about one request a second.
-const MB_GAP_MS = 1100;
 
 // "https://music.apple.com/us/artist/pup/722031743", "…/artist/id722031743".
 const APPLE_ARTIST_RE = /(?:music|itunes)\.apple\.com\/(?:[a-z]{2}\/)?artist\/(?:[^/?#]+\/)?(?:id)?(\d+)/i;
@@ -67,6 +73,13 @@ export function parseMusicBrainz(a) {
     },
   };
 }
+
+// A short description that reads like a performer's: "Canadian punk rock
+// band", "American stand-up comedian". The same words as the row's
+// descriptor guard (DESCRIPTOR_RE in src/feel.js); "1984 film" or "American
+// actor" is more likely someone else with the same name.
+export const PERFORMER_RE =
+  /\b(?:band|musician|singer|rapper|songwriter|duo|trio|group|dj|producer|composer|ensemble|orchestra|comedian|comic|humorist|podcaster|quartet|quintet|collective|artist)s?\b/i;
 
 // A Wikipedia page summary → bio and photo. Disambiguation pages don't count.
 export function parseWikiSummary(d) {
@@ -119,11 +132,14 @@ export function topSongs(results, artistId, limit = MAX_SONGS) {
 }
 
 // ── Fetchers (network) ──────────────────────────────────────────────────────
-// GET JSON. A missing page (404) is no data, not a failure. A hiccup (a
-// timeout, a 5xx, or rate limiting — Wikimedia sends 429s in bursts) gets
-// one quick retry; anything still missing is re-checked within the hour
-// (see the "partial" status below), so nobody waits long on the sheet.
-async function getJSON(url, params, attempt = 0) {
+// GET JSON, after waiting for the service's turn (limits.js). A missing page
+// (404) is no data, not a failure. A hiccup (a timeout, a 5xx, or rate
+// limiting — Wikimedia sends 429s in bursts) gets one quick retry; anything
+// still missing is re-checked within the hour (see the "partial" status
+// below), so nobody waits long on the sheet. In the background a 429 isn't
+// retried: the prefetch's circuit breaker backs off for the whole run instead.
+async function getJSON(url, params, { turn, job } = {}, attempt = 0) {
+  if (turn) await turn(job);
   try {
     const res = await axios.get(url, {
       params,
@@ -135,64 +151,87 @@ async function getJSON(url, params, attempt = 0) {
     const status = err.response?.status;
     if (status === 404) return null;
     if (attempt >= 1 || (status && status < 500 && status !== 429)) throw err;
+    if (status === 429 && job?.background) throw err;
     const asked = Number(err.response?.headers?.['retry-after']) * 1000;
     await sleep(Math.min(2000, asked || 1000));
-    return getJSON(url, params, attempt + 1);
+    return getJSON(url, params, { turn, job }, attempt + 1);
   }
 }
 
-// MusicBrainz asks for at most about one request a second: every call from
-// here waits its turn, however many artist sheets open at once.
-let mbNext = 0;
-async function mbTurn() {
-  const wait = mbNext - Date.now();
-  mbNext = Math.max(Date.now(), mbNext) + MB_GAP_MS;
-  if (wait > 0) await sleep(wait);
-}
+// Every fetcher takes the lookup's `job` ({ background, hint }) last: the
+// turns read job.background to know whether to hold back for the sheet.
+const via = (turn, job) => ({ turn, job });
 
-async function fetchMusicBrainz(name, mbid) {
+async function fetchMusicBrainz(name, mbid, job = {}) {
   let id = mbid;
   if (!id) {
-    await mbTurn();
+    await mbTurn(job);
     const found = await lookupArtist(name);
     if (!found) return null;
     id = found.mbid;
   }
-  await mbTurn();
-  return parseMusicBrainz(await getJSON(`${MB_URL}/${encodeURIComponent(id)}`, { inc: 'url-rels', fmt: 'json' }));
+  return parseMusicBrainz(
+    await getJSON(`${MB_URL}/${encodeURIComponent(id)}`, { inc: 'url-rels', fmt: 'json' }, via(mbTurn, job))
+  );
 }
 
-async function fetchWikipedia(mb) {
+// Wikipedia by name, for a comedian MusicBrainz doesn't know or doesn't
+// link: "Name", then "Name (comedian)". Only a standard article whose short
+// description reads like a performer's counts, so "Hannibal Buress" gets
+// "American stand-up comedian" and a namesake (a film, a footballer) is
+// turned away. Bands aren't looked up this way: a band MusicBrainz doesn't
+// know is usually a local act, and a Wikipedia page under its name is more
+// likely another band's. `summary` fetches one page's summary.
+export async function wikipediaByName(name, hint, summary) {
+  const base = String(name || '').trim();
+  if (!base || hint !== 'comedy') return null;
+  for (const title of [base, `${base} (comedian)`]) {
+    const page = parseWikiSummary(await summary(title));
+    if (page && PERFORMER_RE.test(page.description || '')) return page;
+  }
+  return null;
+}
+
+async function fetchWikipedia(mb, name, job = {}) {
+  const summary = (title) =>
+    getJSON(`${WIKI_SUMMARY_URL}/${encodeURIComponent(title.replace(/ /g, '_'))}`, null, via(wikiTurn, job));
   let title = mb?.wikipediaTitle;
   if (!title && mb?.wikidataId) {
     const d = await getJSON('https://www.wikidata.org/w/api.php', {
       action: 'wbgetentities', ids: mb.wikidataId, props: 'sitelinks', sitefilter: 'enwiki', format: 'json',
-    });
+    }, via(wikiTurn, job));
     title = d?.entities?.[mb.wikidataId]?.sitelinks?.enwiki?.title;
+    // Linked, but with no English article: a page found by name would be
+    // about somebody else.
+    if (!title) return null;
   }
-  if (!title) return null;
-  const page = encodeURIComponent(title.replace(/ /g, '_'));
-  return parseWikiSummary(await getJSON(`https://en.wikipedia.org/api/rest_v1/page/summary/${page}`));
+  if (title) return parseWikiSummary(await summary(title));
+  return wikipediaByName(mb?.name || name, job.hint, summary);
 }
 
-async function fetchApple(name, appleId) {
-  const found = await getJSON(`${ITUNES_URL}/search`, { term: name, entity: 'musicArtist', limit: 10, country: 'US' });
+async function fetchApple(name, appleId, job = {}) {
+  const itunes = via(itunesTurn, job);
+  const found = await getJSON(`${ITUNES_URL}/search`, { term: name, entity: 'musicArtist', limit: 10, country: 'US' }, itunes);
   let artist = pickAppleArtist(name, found?.results, appleId);
   if (!artist && appleId) {
-    artist = pickAppleArtist(name, (await getJSON(`${ITUNES_URL}/lookup`, { id: appleId, country: 'US' }))?.results, appleId);
+    artist = pickAppleArtist(name, (await getJSON(`${ITUNES_URL}/lookup`, { id: appleId, country: 'US' }, itunes))?.results, appleId);
   }
   if (!artist) return null;
   // The song search ranks by popularity; looking up by artist id doesn't, so
   // it's only a fallback for artists the search barely knows.
   const search = await getJSON(`${ITUNES_URL}/search`, {
     term: artist.artistName, entity: 'song', attribute: 'artistTerm', limit: 50, country: 'US',
-  });
+  }, itunes);
   let songs = topSongs(search?.results, artist.artistId);
   if (songs.length < 3) {
-    const more = await getJSON(`${ITUNES_URL}/lookup`, { id: artist.artistId, entity: 'song', limit: 25, country: 'US' });
+    const more = await getJSON(`${ITUNES_URL}/lookup`, { id: artist.artistId, entity: 'song', limit: 25, country: 'US' }, itunes);
     songs = topSongs([...(search?.results || []), ...(more?.results || [])], artist.artistId);
   }
-  return { url: cleanAppleUrl(artist.artistLinkUrl), genre: artist.primaryGenreName || null, songs };
+  // "mb": the artist MusicBrainz links to, so surely them. "name": the first
+  // exact name match, which can be a namesake — rows only play its songs
+  // when the name is distinctive enough (src/feel.js).
+  const match = appleId && String(artist.artistId) === String(appleId) ? 'mb' : 'name';
+  return { url: cleanAppleUrl(artist.artistLinkUrl), genre: artist.primaryGenreName || null, match, songs };
 }
 
 async function fetchSimilar(key, mbid) {
@@ -205,18 +244,20 @@ async function fetchSimilar(key, mbid) {
 export const SOURCES = { musicbrainz: fetchMusicBrainz, wikipedia: fetchWikipedia, apple: fetchApple, similar: fetchSimilar };
 
 // ── Assembly + cache ────────────────────────────────────────────────────────
-async function buildProfile(name, key, sources) {
+async function buildProfile(name, key, sources, job) {
   const failed = [];
   let mb = null;
   try {
-    mb = await sources.musicbrainz(name, getArtist(key)?.mbid || null);
+    mb = await sources.musicbrainz(name, getArtist(key)?.mbid || null, job);
   } catch {
     failed.push('MusicBrainz');
   }
+  // Wikipedia is asked even when MusicBrainz found nothing: comedians are
+  // mostly found there by name.
   const [wiki, apple, similar] = await Promise.allSettled([
-    mb ? sources.wikipedia(mb) : null,
-    sources.apple(mb?.name || name, mb?.appleId || null),
-    sources.similar(key, mb?.mbid || null),
+    sources.wikipedia(mb, name, job),
+    sources.apple(mb?.name || name, mb?.appleId || null, job),
+    sources.similar(key, mb?.mbid || null, job),
   ]);
   if (wiki.status === 'rejected') failed.push('Wikipedia');
   if (apple.status === 'rejected') failed.push('Apple Music');
@@ -258,17 +299,35 @@ async function buildProfile(name, key, sources) {
   return getArtistProfile(key);
 }
 
+// Lookups in progress: key → { job, promise }.
 const inflight = new Map();
 
 // The profile for an artist: from the cache while it's fresh, else looked up
 // (once, however many requests ask at the same moment).
-export async function artistProfile(name, { sources = SOURCES, force = false } = {}) {
+//   hint        'comedy' when the name comes from a comedy show, so a comedian
+//               MusicBrainz doesn't know is looked for as "Name (comedian)"
+//   background  true for the prefetch: it holds back while anyone is waiting
+//               on a sheet. Everything else (the sheet's route) is foreground.
+export async function artistProfile(name, { sources = SOURCES, force = false, hint = null, background = false } = {}) {
   const key = artistKey(name);
   if (!key) return null;
   const cached = getArtistProfile(key);
   if (cached?.fresh && !force) return cached;
-  if (!inflight.has(key)) {
-    inflight.set(key, buildProfile(String(name).trim(), key, sources).finally(() => inflight.delete(key)));
+  const running = inflight.get(key);
+  if (running) {
+    // Someone opened the artist the prefetch is fetching right now: that
+    // lookup stops holding back, since someone is waiting on it.
+    if (!background && running.job.background) {
+      return foreground(() => {
+        promote(running.job);
+        return running.promise;
+      });
+    }
+    return running.promise;
   }
-  return inflight.get(key);
+  const job = { background: Boolean(background), hint: hint || null };
+  const build = () => buildProfile(String(name).trim(), key, sources, job);
+  const promise = (job.background ? build() : foreground(build)).finally(() => inflight.delete(key));
+  inflight.set(key, { job, promise });
+  return promise;
 }

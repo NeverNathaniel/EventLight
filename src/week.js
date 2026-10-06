@@ -334,7 +334,7 @@ function lineupFeel(names, event, ctx) {
   return names.map((name, i) => {
     const bill = names.filter((n) => n !== name);
     return {
-      descriptor: descriptorOf(name, facts),
+      descriptor: descriptorOf(name, facts, { family }),
       tags: displayTags(acts[i], facts).tags.map((t) => t.tag),
       fans: fansOf(acts[i], facts, { limit: 3, exclude: bill }),
       preview: previewOf(name, facts, { family }),

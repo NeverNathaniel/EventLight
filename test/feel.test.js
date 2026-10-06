@@ -47,6 +47,11 @@ tagged('Place Band', ['canadian', 'seattle', 'seen live', '90s', 'a very long ta
 tagged('Comic Tagged', ['comedy', 'stand-up comedy']);
 tagged('Teen Fears', ['emo']);
 tagged('Not Found Band', [], 'not_found');
+tagged('Rock Punk', ['rock', 'punk']);
+// A metal band that shares a play's name, and a country singer who hosts a
+// quiz night: their tags belong to neither the play nor the quiz.
+tagged('Hamlet', ['metal', 'hardcore']);
+tagged('Jen Ray', ['country']);
 
 // Similar lists. Radiohead sits on 13 of 15 lists — a hub — while Turnover is
 // on PUP's list as well as Joyce Manor's.
@@ -91,6 +96,15 @@ profile('Lowercase', { description: 'punk band from Ohio' });
 profile('No Facts', { description: 'Ice hockey player' });
 profile('Lyric Smith', { apple: { genre: 'Hip-Hop/Rap', songs: [] } });
 profile('Ka', { apple: { genre: 'Hip-Hop/Rap', songs: [] } });
+// MusicBrainz's life span for a person is a birth and a death.
+profile('Born Person', { type: 'Person', from: 'Tacoma, United States', since: '1983', until: '2020' });
+// A stand-up's lookup that found a namesake musician.
+profile('Namesake Comic', { type: 'Person', from: 'Austin, United States', description: 'US singer-songwriter' });
+profile('Troupe', { type: 'Group', from: 'Chicago, United States', since: '1999' });
+// Guard words in descriptions of someone (or something) else.
+profile('Strip Band', { description: 'American comic strip' });
+profile('Fighter', { description: 'American martial artist' });
+profile('Producer Comic', { description: 'American comedian and film producer' });
 
 // Venue habits: one room books punk, one is all over the place, one has too
 // few tagged shows to judge.
@@ -113,6 +127,20 @@ for (const tags of [['surf rock'], ['surf rock'], ['surf rock'], ['surf rock'], 
 }
 for (const tags of [['jazz'], ['jazz'], ['jazz'], ['folk'], ['folk'], ['folk'], ['metal'], ['metal'], ['house'], ['house']]) {
   show('Mixed Room', 'Mixed Band', tags);
+}
+// The window's edges: 120 days back and ahead are in, 121 are out.
+for (let i = 0; i < 6; i += 1) show('Window Edge', 'Edge Act', ['bluegrass']);
+show('Window Edge', 'Edge Act', ['bluegrass'], addDays(TODAY, -120));
+show('Window Edge', 'Edge Act', ['bluegrass'], addDays(TODAY, 120));
+for (let i = 0; i < 6; i += 1) show('Past Edge', 'Past Act', ['bluegrass']);
+show('Past Edge', 'Past Act', ['bluegrass'], addDays(TODAY, -121));
+show('Past Edge', 'Past Act', ['bluegrass'], addDays(TODAY, 121));
+// A weekly quiz hosted by that country singer, listed by a music venue.
+for (let i = 0; i < 8; i += 1) {
+  upsertEvent({
+    source: 'scrape', source_name: 'test', title: 'Trivia Night hosted by Jen Ray', lineup: ['Jen Ray'],
+    venue: 'Quiz Bar', date: addDays(TODAY, i * 7 - 28), category: 'music',
+  });
 }
 
 const facts = loadFacts([], buildContext(), { today: TODAY });
@@ -174,6 +202,12 @@ test('a coarse tag goes last, only one of them, and stays when it is alone', () 
   assert.deepEqual(tagsOf(item({ title: 'Glass Harbor' })), ['shoegaze', 'dream pop', 'indie']);
   assert.deepEqual(tagsOf(item({ title: 'Folk Only' })), ['folk']);
   assert.deepEqual(tagsOf(item({ title: 'Many Rocks' })), ['rock']);
+  // Of two broad tags, the one you weighted is the one kept.
+  const both = item({ title: 'Rock Punk' });
+  const f = factsFor([both]);
+  assert.deepEqual(tagsOf(both, f), ['rock']);
+  const punkFan = { ...f, manualGenres: [{ genre: 'punk', key: 'punk', weight: 4 }] };
+  assert.deepEqual(displayTags(both, punkFan).tags, [{ tag: 'punk', hit: true }]);
 });
 
 test('a genre you weighted beyond slot 3 is swapped into slot 3', () => {
@@ -202,6 +236,22 @@ test("an unknown headliner never borrows the opener's tags", () => {
   const shown = displayTags(it, factsFor([it]));
   assert.deepEqual(shown.tags, []);
   assert.deepEqual(shown, { tags: [], from: 'bill', text: 'local bill · 2 acts' });
+});
+
+test("title-led rows never take a namesake's or a host's tags", () => {
+  // Enrichment found a metal band called Hamlet; the play shows no genres.
+  const play = item({ title: 'Hamlet', category: 'other', genre_tags: 'Theatre', _lineup: ['Hamlet'] });
+  assert.deepEqual(displayTags(play, factsFor([play])), { tags: [], from: null });
+  const quiz = item({ title: 'Trivia Night hosted by Jen Ray', category: 'music', _lineup: ['Jen Ray'] });
+  assert.deepEqual(displayTags(quiz, factsFor([quiz])), { tags: [], from: null });
+  // A night's own source tags still say what it is.
+  const jam = item({ title: 'Sunday Jazz Jam', genre_tags: 'jazz', _lineup: [] });
+  assert.deepEqual(displayTags(jam, factsFor([jam])), { tags: [{ tag: 'jazz', hit: false }], from: 'source' });
+  // A movie night's "lineup" is the film, so it gets no fans or descriptor.
+  const movie = item({ title: 'Movie Night: Static Saints', category: 'other', _lineup: ['Static Saints'] });
+  const feel = attachFeel([movie], { facts: factsFor([movie]) })[0]._feel;
+  assert.deepEqual(feel.fans, []);
+  assert.equal(feel.descriptor, null);
 });
 
 test('places, listener habits, decades, long tags and kind echoes are not genres', () => {
@@ -239,6 +289,18 @@ test('venue habits: 8+ tagged shows and a top tag on 40% of them', () => {
   assert.equal(habits.has('Mixed Room'), false, 'no tag on 40% of the shows');
   // Exactly 40% is enough; a second tag on only 20% isn't named.
   assert.deepEqual(habits.get('Edge Room'), { tags: ['surf rock'] });
+});
+
+test('venue habits: 120 days back to 120 days ahead, both ends included', () => {
+  const habits = venueHabits({ today: TODAY });
+  assert.deepEqual(habits.get('Window Edge'), { tags: ['bluegrass'] }, 'shows on the edge days count');
+  assert.equal(habits.has('Past Edge'), false, 'shows a day past either edge do not');
+});
+
+test("venue habits: a quiz night's host isn't what the room books", () => {
+  assert.equal(venueHabits({ today: TODAY }).has('Quiz Bar'), false);
+  const band = item({ title: 'Nobody Known', venue: 'Quiz Bar' });
+  assert.deepEqual(displayTags(band, factsFor([band])), { tags: [], from: null });
 });
 
 test('the habit line only fills in for a music row with no genres', () => {
@@ -306,6 +368,33 @@ test('descriptor: a performer-like description, asides removed', () => {
   assert.equal(descriptorOf('Ended Band', all), 'Band from Olympia, United States · 2001–2010');
   assert.equal(descriptorOf('Nobody Known', f), null);
   assert.ok(DESCRIPTOR_RE.test('American stand-up comedian') && !DESCRIPTOR_RE.test('1984 film'));
+});
+
+test("descriptor: a person's life span isn't a career, and a row wants its own kind of act", () => {
+  const names = ['Born Person', 'Namesake Comic', 'Troupe', 'Strip Band', 'Fighter', 'Producer Comic', 'Hannibal Buress', 'Alvvays'];
+  const all = factsFor(names.map((title) => item({ title })));
+  // MusicBrainz's 1983–2020 for a person is a birth and a death.
+  assert.equal(descriptorOf('Born Person', all), 'Musician from Tacoma, United States');
+  // A musician's description on a stand-up row means a namesake: nothing,
+  // not even a "Comedian from Austin" built from the namesake's facts.
+  assert.equal(descriptorOf('Namesake Comic', all, { family: 'comedy' }), null);
+  assert.equal(descriptorOf('Namesake Comic', all, { family: 'music' }), 'US singer-songwriter');
+  assert.equal(descriptorOf('Hannibal Buress', all, { family: 'music' }), null);
+  assert.equal(descriptorOf('Hannibal Buress', all, { family: 'comedy' }), 'American comedian');
+  assert.equal(descriptorOf('Alvvays', all, { family: 'comedy' }), null);
+  assert.equal(descriptorOf('Troupe', all, { family: 'music' }), 'Band from Chicago, United States · since 1999');
+  assert.equal(descriptorOf('Troupe', all, { family: 'comedy' }), null);
+  // Guard words in someone else's description don't count…
+  assert.equal(descriptorOf('Strip Band', all), null);
+  assert.equal(descriptorOf('Fighter', all), null);
+  // …but a comedian who also produces films is still a comedian.
+  assert.equal(descriptorOf('Producer Comic', all, { family: 'comedy' }), 'American comedian and film producer');
+  // On a music row, a comedian's profile is neither described nor "known".
+  const it = item({ title: 'Hannibal Buress' });
+  const feel = attachFeel([it], { facts: factsFor([it]) })[0]._feel;
+  assert.equal(feel.descriptor, null);
+  assert.equal(feel.known.profile, false);
+  assert.equal(feel.preview, null);
 });
 
 test('preview: only from a confident Apple match', () => {
@@ -422,6 +511,10 @@ test('DJ nights get fans of their DJs', () => {
   const feel = attachFeel([it], { facts: factsFor([it]) })[0]._feel;
   assert.deepEqual(feel.fans.map((x) => x.name), ['DJ Bar', 'House Crew']);
   assert.deepEqual(feel.link, { kind: 'fans', text: 'For fans of DJ Bar, House Crew' });
+  // A lone DJ named in the title is the act, not just the title again.
+  const solo = item({ title: 'DJ Foo', _lineup: ['DJ Foo'] });
+  const soloFeel = attachFeel([solo], { facts: factsFor([solo]) })[0]._feel;
+  assert.deepEqual(soloFeel.link, { kind: 'fans', text: 'For fans of DJ Bar, House Crew' });
 });
 
 test('a comedian row: descriptor and a Comedy preview, no genres', () => {

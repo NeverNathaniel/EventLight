@@ -327,35 +327,72 @@ function soundsLike(item) {
   return m ? { name: m[1], seed: m[2] } : null;
 }
 
-function dekFragment(p) {
+// What one pick adds to the day's sentence. Favorites and sound-alikes come
+// back as parts so two of them can share a phrase ("favorites at A and B",
+// "X and Y, who sound like Z").
+function dekPart(p) {
   const kind = p._kind || kindOf(p);
   const venue = venueName(p.venue);
-  if ((p._reasons || []).some((r) => r.kind === 'favorite')) return `a favorite at ${venue}`;
+  if (p.going || p._role?.key === 'plan') return { text: `your night at ${venue}` };
+  if ((p._reasons || []).some((r) => r.kind === 'favorite')) return { type: 'favorite', venue };
   const similar = soundsLike(p);
-  if (similar) return `${similar.name}, who sounds like ${similar.seed}`;
+  if (similar) return { type: 'similar', ...similar };
   if (kind.family === 'film') {
-    if (hasFlag(p, 'one-night')) return `a one-night ${titleOf(p)}`;
-    if (hasFlag(p, 'last-chance')) return `last call for ${titleOf(p)}`;
-    return `${titleOf(p)} at ${theaterName(p.venue)}`;
+    if (hasFlag(p, 'one-night')) return { text: `a one-night ${titleOf(p)}` };
+    if (hasFlag(p, 'last-chance')) return { text: `last call for ${titleOf(p)}` };
+    return { text: `${titleOf(p)} at ${theaterName(p.venue)}` };
   }
   if (kind.family === 'comedy') {
     const what = COMEDY_WORDS[kind.key] || 'stand-up';
-    return p.city ? `${what} in ${p.city}` : `${what} at ${venue}`;
+    return { text: p.city ? `${what} in ${p.city}` : `${what} at ${venue}` };
   }
-  if (p.going || p._role?.key === 'plan') return `your night at ${venue}`;
   const hit = (p._feel?.tags || []).find((t) => t.hit);
-  if (hit) return `${hit.tag} at ${venue}`;
-  return `${titleOf(p)} at ${venue}`;
+  if (hit) return { text: `${hit.tag} at ${venue}` };
+  return { text: `${titleOf(p)} at ${venue}` };
 }
 
-// "A, B and C." with the first letter capitalised.
+const andList = (list) => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0]);
+
+// The picks' parts as phrases, with favorites and same-seed sound-alikes
+// sharing one, and repeats dropped.
+function dekPhrases(picks) {
+  const parts = [];
+  for (const part of picks.slice(0, 3).map(dekPart)) {
+    const same = parts.find((x) => x.type && x.type === part.type && (part.type === 'favorite' || x.seed === part.seed));
+    if (same) {
+      if (part.type === 'favorite') same.venues.push(part.venue);
+      else same.names.push(part.name);
+      continue;
+    }
+    if (part.text && parts.some((x) => x.text === part.text)) continue;
+    parts.push(part.type === 'favorite' ? { ...part, venues: [part.venue] } : part.type === 'similar' ? { ...part, names: [part.name] } : part);
+  }
+  return parts.map((x) => {
+    if (x.type === 'favorite') {
+      const venues = [...new Set(x.venues)];
+      if (x.venues.length === 1) return `a favorite at ${venues[0]}`;
+      return venues.length === 1 ? `${x.venues.length === 2 ? 'two' : 'three'} favorites at ${venues[0]}` : `favorites at ${andList(venues)}`;
+    }
+    if (x.type === 'similar') {
+      return x.names.length > 1 ? `${andList(x.names)}, who sound like ${x.seed}` : `${x.name}, who sounds like ${x.seed}`;
+    }
+    return x.text;
+  });
+}
+
+// "A, B and C." with the first letter capitalised — or "A, and B." when a
+// phrase has its own "and", so the last one doesn't run into it.
 function sentence(parts) {
-  const body = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
+  let body = parts[0];
+  if (parts.length > 1) {
+    const inner = parts.some((x) => / and /.test(x));
+    body = `${parts.slice(0, -1).join(', ')}${inner ? ', and ' : ' and '}${parts[parts.length - 1]}`;
+  }
   return `${body.charAt(0).toUpperCase()}${body.slice(1)}.`;
 }
 
 // One sentence about the day, from its picks in order — the same picks
-// always give the same sentence. At most 110 characters: trailing fragments
+// always give the same sentence. At most 110 characters: trailing phrases
 // are dropped to fit.
 //   counts: { total, regulars, … } for the whole day (shows and films)
 //   regularKinds: lowercase kind labels of the day's regulars ('trivia', …)
@@ -369,7 +406,7 @@ export function dayDek(picks, { counts, regularKinds = [] } = {}) {
     }
     return 'Nothing close to your taste. Everything on is below.';
   }
-  const parts = [...new Set(picks.slice(0, 3).map(dekFragment))];
+  const parts = dekPhrases(picks);
   while (parts.length > 1 && sentence(parts).length > DEK_MAX) parts.pop();
   const text = sentence(parts);
   if (text.length <= DEK_MAX) return text;

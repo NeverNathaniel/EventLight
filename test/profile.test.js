@@ -5,13 +5,15 @@
 import './helpers/memory-db.js'; // must stay the first import
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import axios from 'axios';
 
 const { migrate } = await import('../src/db/migrate.js');
 const { default: db } = await import('../src/db/index.js');
 const { setFavoriteArtist, getArtistProfile } = await import('../src/db/artists.js');
-const { parseMusicBrainz, parseWikiSummary, pickAppleArtist, topSongs, artistProfile } = await import(
+const { parseMusicBrainz, parseWikiSummary, pickAppleArtist, topSongs, artistProfile, wikipediaByName } = await import(
   '../src/enrich/profile.js'
 );
+const limits = await import('../src/enrich/limits.js');
 const { profileView } = await import('../src/week.js');
 
 migrate();
@@ -180,4 +182,166 @@ test('the artist sheet marks your favorites among similar artists', async () => 
     { name: 'Joyce Manor', favorite: true },
   ]);
   assert.equal(profileView(null), null);
+});
+
+// ── Wikipedia by name, Apple match, and the shared limits ───────────────────
+
+const page = (description, extra = {}) => ({
+  type: 'standard',
+  extract: `Someone, ${description}.`,
+  description,
+  content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/X' } },
+  ...extra,
+});
+
+test('Wikipedia by name: a performer page is taken, a namesake is turned away', async () => {
+  const pages = {
+    'Hannibal Buress': page('American stand-up comedian (born 1983)'),
+    'Nate Jackson': page('American football player'),
+    'Nate Jackson (comedian)': page('American comedian'),
+    'Movements (band)': page('American post-hardcore band'),
+    'Ali Siddiq': page('American actor'),
+  };
+  const asked = [];
+  const summary = async (title) => {
+    asked.push(title);
+    return pages[title] || null;
+  };
+  assert.equal((await wikipediaByName('Hannibal Buress', 'comedy', summary)).description, 'American stand-up comedian (born 1983)');
+  assert.deepEqual(asked, ['Hannibal Buress'], 'a performer page by plain name is enough');
+  assert.equal((await wikipediaByName('Nate Jackson', 'comedy', summary)).description, 'American comedian');
+  asked.length = 0;
+  assert.equal(await wikipediaByName('Movements', null, summary), null, 'a band is never looked up by name');
+  assert.deepEqual(asked, []);
+  asked.length = 0;
+  assert.equal(await wikipediaByName('Ali Siddiq', 'comedy', summary), null, 'an actor of the same name is not the comic');
+  assert.deepEqual(asked, ['Ali Siddiq', 'Ali Siddiq (comedian)']);
+});
+
+// Every outbound request answered from a table, so the real fetchers run
+// without the network. Unknown URLs are a 404.
+function stubHttp(routes) {
+  const asked = [];
+  const original = axios.get;
+  axios.get = async (url, { params = {} } = {}) => {
+    asked.push(decodeURIComponent(url));
+    for (const [matches, reply] of routes) {
+      if (!matches(url, params)) continue;
+      if (reply instanceof Error) throw reply;
+      return { data: typeof reply === 'function' ? reply(url, params) : reply };
+    }
+    throw Object.assign(new Error('HTTP 404'), { response: { status: 404 } });
+  };
+  return { asked, restore: () => { axios.get = original; } };
+}
+
+// The rate limits' waits pass instantly on a fake clock.
+function fakeClock() {
+  let t = 0;
+  const slept = [];
+  limits.setClock({ now: () => t, sleep: async (ms) => { slept.push(ms); t += ms; } });
+  limits.resetLimits();
+  return { slept };
+}
+
+const wikiSummary = (title) => (url) => url.endsWith(`/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`);
+const isItunes = (entity) => (url, params) => url.startsWith('https://itunes.apple.com/search') && params.entity === entity;
+
+test(`a comedian MusicBrainz doesn't know is found on Wikipedia as "Name (comedian)"`, async () => {
+  fakeClock();
+  const http = stubHttp([
+    [(url) => url === 'https://musicbrainz.org/ws/2/artist', { artists: [] }],
+    [wikiSummary('Nate Jackson'), page('American football player (born 1979)')],
+    [wikiSummary('Nate Jackson (comedian)'), page('American stand-up comedian')],
+    [isItunes('musicArtist'), { results: [{ wrapperType: 'artist', artistId: 42, artistName: 'Nate Jackson', primaryGenreName: 'Comedy' }] }],
+    [isItunes('song'), { results: [song(42, 'Super Funny'), song(42, 'Pancakes'), song(42, 'Uncle Pete')] }],
+  ]);
+  try {
+    const p = await artistProfile('Nate Jackson', { hint: 'comedy' });
+    assert.equal(p.status, 'found');
+    assert.equal(p.description, 'American stand-up comedian');
+    assert.equal(p.bio, 'Someone, American stand-up comedian.');
+    assert.equal(p.apple.genre, 'Comedy');
+    assert.equal(p.apple.match, 'name', 'no MusicBrainz link, so Apple was matched by name');
+    assert.ok(http.asked.some((u) => u.endsWith('Nate_Jackson_(comedian)')));
+  } finally {
+    http.restore();
+    limits.setClock();
+  }
+});
+
+test('a band MusicBrainz doesn’t know is never looked up on Wikipedia by name', async () => {
+  fakeClock();
+  const http = stubHttp([
+    [(url) => url === 'https://musicbrainz.org/ws/2/artist', { artists: [] }],
+    [wikiSummary('Lemon Twigs Junior'), page('American indie rock band')],
+  ]);
+  try {
+    const p = await artistProfile('Lemon Twigs Junior');
+    assert.equal(p.status, 'not_found');
+    assert.equal(p.description, null, 'a same-named band’s page is probably somebody else');
+    assert.ok(!http.asked.some((u) => u.includes('wikipedia.org')));
+  } finally {
+    http.restore();
+    limits.setClock();
+  }
+});
+
+test("Apple: the artist MusicBrainz links to is recorded as an 'mb' match, ahead of a namesake", async () => {
+  const { slept } = fakeClock();
+  const http = stubHttp([
+    [(url) => url === 'https://musicbrainz.org/ws/2/artist', { artists: [{ id: PUP_MB.id, name: 'PUP', score: 100, tags: [] }] }],
+    [(url) => url.startsWith('https://musicbrainz.org/ws/2/artist/'), PUP_MB],
+    [(url) => url.startsWith('https://www.wikidata.org/'), { entities: { Q16967929: { sitelinks: { enwiki: { title: 'PUP (band)' } } } } }],
+    [wikiSummary('PUP (band)'), page('Canadian punk rock band')],
+    [isItunes('musicArtist'), { results: [
+      { wrapperType: 'artist', artistId: 1398609389, artistName: 'PUP', primaryGenreName: "Children's Music" },
+      { wrapperType: 'artist', artistId: 722031743, artistName: 'PUP', primaryGenreName: 'Alternative' },
+    ] }],
+    [isItunes('song'), { results: [song(722031743, 'Kids'), song(722031743, 'DVP'), song(722031743, 'Totally Fine')] }],
+    [(url) => url.includes('listenbrainz'), []],
+  ]);
+  try {
+    const p = await artistProfile('PUP', { force: true });
+    assert.equal(p.apple.match, 'mb');
+    assert.equal(p.apple.genre, 'Alternative');
+    assert.equal(p.description, 'Canadian punk rock band', 'a linked page needs no guard');
+    // Through the shared limits: the two MusicBrainz calls 1.1 s apart, the
+    // two Wikimedia ones (Wikidata, then the page) 250 ms apart.
+    assert.deepEqual(slept, [1100, 250]);
+  } finally {
+    http.restore();
+    limits.setClock();
+  }
+});
+
+test('opening an artist the background prefetch is fetching joins that lookup instead of deadlocking', { timeout: 5000 }, async () => {
+  limits.resetLimits();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let jobSeen = null;
+  const sources = {
+    musicbrainz: async (name, mbid, job) => {
+      jobSeen = job;
+      await gate;
+      // The background holds back while a sheet is loading, so without the
+      // hand-over this would wait on the very sheet that is waiting on it.
+      await limits.itunesTurn(job);
+      return null;
+    },
+    wikipedia: async () => page('American indie rock band'),
+    apple: async () => null,
+    similar: async () => [],
+  };
+  const background = artistProfile('Lemon Shark Parade', { sources, background: true });
+  await Promise.resolve();
+  assert.equal(jobSeen.background, true);
+  const sheet = artistProfile('Lemon Shark Parade', { sources });
+  assert.equal(limits.foregroundBusy(), true);
+  assert.equal(jobSeen.background, false, 'the lookup is the sheet\'s now');
+  release();
+  const [a, b] = await Promise.all([background, sheet]);
+  assert.equal(a.description, 'American indie rock band');
+  assert.equal(b.status, 'found');
+  assert.equal(limits.foregroundBusy(), false);
 });

@@ -409,6 +409,20 @@ test('dek: two fragments join with "and"; repeats collapse', () => {
   assert.equal(dek([a, b, c]), 'Stand-up in Tacoma and Static Saints at Clock-Out Lounge.');
 });
 
+test('dek: your plan leads, and favorites or sound-alikes share a phrase', () => {
+  const fav = (venue, extra = {}) => music(14, { venue, _reasons: favorite(), ...extra });
+  assert.equal(dek([fav('Real Art Tacoma', { going: 1 })]), 'Your night at Real Art Tacoma.', 'Going beats favorite');
+  assert.equal(dek([fav('Jazzbones'), fav('The Paramount Theatre')]), 'Favorites at Jazzbones and the Paramount Theatre.');
+  assert.equal(dek([fav('Jazzbones'), fav('Jazzbones')]), 'Two favorites at Jazzbones.');
+  const sounds = (name) => music(9, { _headline: name, _reasons: [{ kind: 'similar', text: `${name} sounds like Alvvays` }] });
+  assert.equal(dek([sounds('Mossback'), sounds('Glass Harbor')]), 'Mossback and Glass Harbor, who sound like Alvvays.');
+  assert.equal(
+    dek([fav('Jazzbones'), fav('The Paramount Theatre'), comedy(8, { city: 'Tacoma' })]),
+    'Favorites at Jazzbones and the Paramount Theatre, and stand-up in Tacoma.',
+    'a comma keeps the last phrase from running into the first one’s "and"'
+  );
+});
+
 test('dek: trailing fragments are dropped to fit 110 characters', () => {
   const long = (name) => music(8, { _headline: name, venue: 'The Crocodile Ballroom Annex' });
   const picks = [long('The Extraordinarily Long Band Name'), long('Another Very Long Band Name Here'), long('Third')];
