@@ -14,6 +14,7 @@ import { DATA_DIR } from './config.js';
 import { kindOf, seriesKey, cleanTitle } from './kinds.js';
 import { artistKey } from './lineup.js';
 import { hasArtistMatch } from './scoring/engine.js';
+import { filmTaste, STRONG_TASTE } from './cinema/taste.js';
 import { todayISO, addDays, localISO } from './dates.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -38,7 +39,10 @@ const headlinerOf = (item) =>
 // A film listed this many times or more is a run (cinema/group.js calls three
 // or fewer a special screening).
 const RUN_MIN_PEAK = 4;
-const FILM_MAX = 9;
+// The occasion and the reviews top out at 9; your taste (cinema/taste.js)
+// adds up to 6 more, to 11 at most — still under a favorite band (12+).
+const FILM_OCCASION_MAX = 9;
+const FILM_MAX = 11;
 const RESTORED_RE = /\b4k\b|restor|35\s?mm|70\s?mm|anniversary/i;
 
 // The critics' score on Metacritic's scale. Rotten Tomatoes percentages run
@@ -72,13 +76,14 @@ function opensNear(film) {
   return film.peak == null || film.upcoming == null || film.peak <= film.upcoming;
 }
 
-// How much a film on a given date deserves a place among the picks. Films
-// aren't matched against your taste, so it's what makes a screening an
-// occasion: one night only, the last days of a well-reviewed run, an opening.
+// How much a film on a given date deserves a place among the picks: what
+// makes a screening an occasion (one night only, the last days of a
+// well-reviewed run, an opening), then how close it is to your film taste.
 //   film: a filmsByDay() item (special, upcoming, peak, firstDate, lastDate,
-//         release_date…)
+//         release_date, director, starring, wd_genres, crew, synopsis…)
 //   horizonByTheater: theater → the last date it has posted showtimes for
-export function filmScore(film, { today = todayISO(), horizonByTheater = new Map() } = {}) {
+//   taste: the compiled film-taste profile (cinema/taste.js), or null
+export function filmScore(film, { today = todayISO(), horizonByTheater = new Map(), taste = null } = {}) {
   const special = Boolean(film.special);
   const upcoming = film.upcoming ?? (film.times || []).length;
   const oneNight = special && upcoming === 1;
@@ -126,14 +131,22 @@ export function filmScore(film, { today = todayISO(), horizonByTheater = new Map
   const restored = RESTORED_RE.test(film.title || '');
   if (restored) score += 0.5;
 
+  // Your taste leads the reasons: "One of your favorites", "Directed by…".
+  const fit = filmTaste(film, taste);
+  score = Math.min(FILM_OCCASION_MAX, score) + fit.score;
+  const acclaimed = crit != null && crit >= 75;
+
   return {
-    score: Math.min(FILM_MAX, score),
+    score: Math.round(Math.max(0, Math.min(FILM_MAX, score)) * 100) / 100,
     crit,
     flags,
-    // A run is only worth a pick on its first or last days, and only if it's good.
-    eligible: special || (crit != null && crit >= 75 && (lastChance || opens)),
+    // A run is only worth a pick on its first or last days, and only if it's
+    // good or squarely your kind of film — unless it's one of your favorites,
+    // back on the big screen.
+    eligible: special || Boolean(fit.favorite) || ((acclaimed || fit.score >= STRONG_TASTE) && (lastChance || opens)),
     restored,
-    reasons,
+    taste: { score: fit.score, favorite: fit.favorite, strong: fit.strong, because: fit.because, link: fit.link },
+    reasons: [...fit.reasons, ...reasons],
   };
 }
 
@@ -374,6 +387,9 @@ function dekPart(p) {
   const kind = p._kind || kindOf(p);
   const venue = venueName(p.venue);
   if (p.going || p._role?.key === 'plan') return { text: `your night at ${venue}` };
+  // One of your favorite films isn't "a favorite at the Grand" (that's a band).
+  const favoriteFilm = kind.family === 'film' && (p._film?.taste?.favorite || p._favoriteFilm);
+  if (favoriteFilm) return { text: p.kind === 'film' ? `${favoriteFilm} on the big screen` : `${favoriteFilm} at ${venue}` };
   if ((p._reasons || []).some((r) => r.kind === 'favorite')) return { type: 'favorite', venue };
   const similar = soundsLike(p);
   if (similar) return { type: 'similar', ...similar };

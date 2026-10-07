@@ -196,7 +196,9 @@ function linkLine(e) {
   }
   if (!l) return '';
   const g = LINK_GLYPH[l.kind];
-  return `${g ? `<span class="g" aria-hidden="true">${g}</span> ` : ''}${esc(l.text)}`;
+  // A film's flag comes first: "One night only · ♥ One of your favorites".
+  const pre = l.pre ? `${esc(l.pre)} · ` : '';
+  return `${pre}${g ? `<span class="g" aria-hidden="true">${g}</span> ` : ''}${esc(l.text)}`;
 }
 
 // "For fans of A, B & C", when the link line went to something else.
@@ -580,6 +582,7 @@ function movieEntry(m, special) {
     showtimes: m.showtimes, venue: m.theater, city: m.city, ticket_url: m.url, special,
     rating: m.rating, runtime: m.runtime, director: m.director, starring: m.starring, year: m.year,
     genre: m.genre, synopsis: m.synopsis, poster_url: m.poster_url, trailer_url: m.trailer_url, mc_score: m.mc_score, rt_score: m.rt_score,
+    crew: m.crew,
     // The server scores each film as of its next showing (flags, the feel
     // line, reasons); an older server's listing falls back to the basics.
     _kind: m._kind, _feel: m._feel, _film: m._film, _pick: m._pick,
@@ -731,15 +734,25 @@ function sheetFilm(f) {
     times = [...byDay].slice(0, 6).map(([date, list]) => `<p class="s-text"><strong>${esc(dayName(date))}</strong> · ${esc(list.join(', '))}</p>`).join('');
   }
   const scores = [f.mc_score != null ? `Metacritic ${f.mc_score}` : '', f.rt_score != null ? `Rotten Tomatoes ${f.rt_score}%` : ''].filter(Boolean);
-  const notes = (f._reasons || []).map((r) => r.text).filter((t) => !/^(Metacritic|Rotten)/.test(t));
+  // Why it's here: your taste first (♥ a favorite, ≈ who and what it's
+  // like), then the occasion (◆ One night only, Last chance…).
+  const reasons = (f._reasons || []).filter((r) => !/^(Metacritic|Rotten)/.test(r.text));
+  // The crew Wikidata knows beyond the director: writer, score, camera.
+  const crew = f.crew || {};
+  const others = (role) => (crew[role] || []).filter((n) => !String(f.director || '').includes(n));
+  const crewText = [['Written by', others('writer')], ['Score by', crew.composer || []], ['Shot by', crew.cinematographer || []]]
+    .filter(([, names]) => names.length)
+    .map(([label, names]) => `${label} ${names.slice(0, 2).join(' & ')}`)
+    .join('. ');
   return {
     body: `<p class="s-eye">Film${f.times ? ` · ${esc(dayName(f.date))} · ${esc(shortDate(f.date))}` : ''}</p>
       <div class="s-title">${esc(f.title)}</div>
       <p class="s-sub">${esc([f.year, f.rating, runtime(f.runtime), f.genre].filter(Boolean).join(' · '))}</p>
       <p class="s-sub">${esc([f.venue, f.city].filter(Boolean).join(' · '))}</p>
       ${isHttp(f.poster_url) ? `<img class="poster" src="${esc(f.poster_url)}" alt="" loading="lazy" />` : ''}
-      ${notes.length ? `<p class="s-text">${GLYPH.film} ${esc(notes.join(' · '))}</p>` : ''}
+      ${reasons.length ? `<ul class="reasons">${reasons.map((r) => `<li><span class="g">${GLYPH[r.kind] || '·'}</span>${esc(r.text)}</li>`).join('')}</ul>` : ''}
       ${f.director || f.starring ? `<p class="s-text">${esc([f.director ? `Directed by ${f.director}` : '', f.starring ? `With ${f.starring}` : ''].filter(Boolean).join('. '))}</p>` : ''}
+      ${crewText ? `<p class="s-text">${esc(crewText)}</p>` : ''}
       ${f.synopsis ? `<p class="s-text">${esc(f.synopsis)}</p>` : ''}
       ${scores.length ? `<div class="tags">${scores.map((s) => `<span class="tag">${esc(s)}</span>`).join('')}</div>` : ''}
       <div class="s-h">Showtimes</div>${times}`,

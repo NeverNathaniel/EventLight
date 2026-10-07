@@ -125,6 +125,11 @@ export function filmsByDay(from, to, now = Date.now(), movies = getMovies()) {
         trailer_url: m.trailer_url,
         mc_score: m.mc_score,
         rt_score: m.rt_score,
+        // For your film taste: the TMDB id finds a favorite, Wikidata's
+        // genres and crew find the rest.
+        tmdb_id: m.tmdb_id || null,
+        wd_genres: m.wd_genres || null,
+        crew: m.crew || {},
         _score: 0,
         _reasons: [],
       });
@@ -177,17 +182,29 @@ function dressedDays(from, to, { today, now, movies }) {
   return byDate;
 }
 
-// Films in the order the day page lists them: one-off screenings, then last
-// chances, openings, the best reviewed, and the earliest show.
+// Films in the order the day page lists them: one-off screenings and your
+// kind of film (a favorite, or squarely your taste), then last chances,
+// openings, the rest; within each, the strongest film score (reviews and
+// taste), the best reviewed, and the earliest show.
 function filmOrder(a, b) {
-  const rank = (f) => (f.kind !== 'film' ? 1 : f.special ? 0 : hasFlag(f, 'last-chance') ? 2 : hasFlag(f, 'opens') ? 3 : 4);
-  return rank(a) - rank(b) || (b._film?.crit ?? -1) - (a._film?.crit ?? -1) || timeOf(a).localeCompare(timeOf(b));
+  const yours = (f) => Boolean(f._film?.taste?.favorite || f._film?.taste?.strong);
+  const rank = (f) =>
+    f.kind !== 'film' ? 1 : f.special || yours(f) ? 0 : hasFlag(f, 'last-chance') ? 2 : hasFlag(f, 'opens') ? 3 : 4;
+  return (
+    rank(a) - rank(b) ||
+    (b._film?.score ?? 0) - (a._film?.score ?? 0) ||
+    (b._film?.crit ?? -1) - (a._film?.crit ?? -1) ||
+    timeOf(a).localeCompare(timeOf(b))
+  );
 }
 
 // What to say about a film in one line on the Week screen.
 function filmNote(f) {
+  const taste = f._film?.taste;
+  if (taste?.favorite) return 'a favorite';
   const flag = (f._flags || []).find((x) => ['one-night', 'last-chance', 'opens'].includes(x.key));
   if (flag) return flag.key === 'one-night' ? 'one night' : flag.label.toLowerCase();
+  if (taste?.strong && taste.because?.length) return `like ${taste.because[0]}`;
   if (f.mc_score != null) return `MC ${f.mc_score}`;
   if (f.rt_score != null) return `RT ${f.rt_score}%`;
   return null;

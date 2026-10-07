@@ -48,37 +48,43 @@ export const replaceTheaterMovies = db.transaction((theaterId, rows) => {
   return { saved: rows.length, added, removed };
 });
 
-// Films whose Wikidata facts are missing or older than a week (scores move).
+// Films whose Wikidata facts are missing or older than a week (scores move),
+// or were fetched before the crew was (wd_crew NULL — a film Wikidata
+// doesn't know stores '{}', so it isn't asked again until the week is up).
 export function moviesNeedingFacts() {
   return db
     .prepare(
       `SELECT id, tmdb_id FROM movies WHERE tmdb_id IS NOT NULL AND tmdb_id != ''
-         AND (wd_fetched_at IS NULL OR wd_fetched_at < datetime('now', '-7 days'))`
+         AND (wd_fetched_at IS NULL OR wd_fetched_at < datetime('now', '-7 days') OR wd_crew IS NULL)`
     )
     .all();
 }
 
 export function saveMovieFacts(id, facts) {
   db.prepare(
-    `UPDATE movies SET wd_genres = ?, wd_series = ?, rt_score = ?, mc_score = ?,
+    `UPDATE movies SET wd_genres = ?, wd_series = ?, rt_score = ?, mc_score = ?, wd_crew = ?,
        wd_fetched_at = datetime('now') WHERE id = ?`
   ).run(
     facts ? facts.genres.join(', ') : null,
     facts?.series ?? null,
     facts?.rt ?? null,
     facts?.mc ?? null,
+    // A crew lookup that failed (null) is left NULL to be asked again.
+    facts?.crew === null ? null : JSON.stringify(facts?.crew || {}),
     id
   );
 }
 
-function parse(row) {
-  let showtimes = [];
+function parseJson(text, fallback) {
   try {
-    showtimes = JSON.parse(row.showtimes || '[]');
+    return JSON.parse(text) ?? fallback;
   } catch {
-    /* keep [] */
+    return fallback;
   }
-  return { ...row, showtimes };
+}
+
+function parse(row) {
+  return { ...row, showtimes: parseJson(row.showtimes || '[]', []), crew: parseJson(row.wd_crew || '{}', {}) };
 }
 
 export function getMovies() {

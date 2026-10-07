@@ -6,7 +6,7 @@ A self-hosted dashboard for live **music** and **comedy** across **Seattle, Taco
 - **A page for each day** — tap a day for its own page: up to three picks, your other plans, then everything else (music, comedy, the movies, around town), with the weekly regulars folded away
 - **Everything says what it is** — every listing is tagged Music, Stand-up, Film, Theater, Drag, Trivia, Karaoke, DJ night, Open mic… and flagged when it's sold out, free, one night only or a last chance
 - **A feel for it before you tap** — each listing shows its genres (yours highlighted), who it's for (_"For fans of Joyce Manor, Jeff Rosenstock"_) or who it sounds like, a one-line description of the act, and a play button for their best-known song
-- **Curated** — picks are spread across music, comedy and film rather than five punk shows, weekly nights don't crowd out one-offs, and films are ranked by reviews, one-night screenings and last chances
+- **Curated** — picks are spread across music, comedy and film rather than five punk shows, weekly nights don't crowd out one-offs, and films are ranked by your film taste, reviews, one-night screenings and last chances
 - **Explore** — search and browse everything (films included), as a list or a month calendar, with each day's films alongside its shows; Music, Comedy and Around town group shows the same way the day pages do; **Film** has the cinema listings, best first
 - **Saved** — the shows you're **Going** to and the ones marked **Maybe**, plus Claude's curated lists
 - **Tap into anything** — a show, an artist or a venue opens with the details: who's on the bill, why it's a pick, what else is on that night, and the artist's other dates
@@ -14,6 +14,7 @@ A self-hosted dashboard for live **music** and **comedy** across **Seattle, Taco
 - **Phone or desktop** — one column on a phone; on a wide screen the Week, day, Explore and Saved screens spread into columns
 - **Going / Maybe** — mark your plans; Going shows feed a calendar link you can subscribe to on your phone
 - **Movies** — what's playing at The Grand Cinema (Tacoma), with kids' movies and vapid action movies filtered out
+- **Film taste** — a profile built from your favorite films and shows (`film-taste.json`) ranks what's playing: the directors, writers, composers, cinematographers and actors behind them, their genres and what they're about. Every film says who it's like (_"Like Sicario & Wind River"_), and a favorite back on the big screen is a pick
 - **Preference engine** — favorite artists, "sounds like your favorites" discovery, genre weights, and learning from what you star — every pick says *why* it ranks
 - **Alerts** — a push on your phone when a favorite artist has a new show, plus a weekly Top Picks digest (via [ntfy](https://ntfy.sh), free, no account)
 - **Artist enrichment** — pulls the bands out of every listing title and looks up their genres (MusicBrainz) and sound-alikes (ListenBrainz) — free, keyless, cached
@@ -89,6 +90,7 @@ Open **http://\<host\>:3000**.
 | --- | --- |
 | `./data/` volume | The SQLite database — survives rebuilds and image upgrades |
 | `./feeds.json`, `./scrapers.json` bind mounts | Source config — edits made in the Settings UI persist on the host |
+| `./film-taste.json` bind mount | Your film taste — edit it on the host and the next page load uses it |
 | `./.env` bind mount | API keys — editable in the Settings UI or by hand |
 | `shm_size: 1gb` | Chromium crashes with Docker's default 64 MB `/dev/shm`, especially inside an LXC |
 | `init: true` | Reaps zombie Chromium processes left behind by the scraper |
@@ -320,7 +322,7 @@ Profiles are looked up in the background after each refresh (`src/enrich/prefetc
 
 **Picks** (`src/curation.js`). Each listing gets a pick score: the preference score, plus a little for an act we know about, a release or farewell show, and for comedy, a notable comedian (a profile, or a Ticketmaster listing) over an open mic. Your plans count (Going leads its day), and sold-out shows sink. A day's picks are chosen greedily, at most three: each pick from the same family (music, comedy, film), venue or genre as one already chosen counts for less, a headliner is never picked twice, at most one is a film, and nothing below 3 is ever forced in. So a night with three punk shows, a one-night film and a comedian gets the two best punk shows and the film. The same picks show on the Week and on the day's page, each labelled: The pick, Your plan, One night only, At the movies, For a laugh, Also good.
 
-**Films** are scored on their own terms: a one-night or special screening, then reviews (Metacritic, or Rotten Tomatoes), a last chance (the final day or two of a run, when the theater has posted dates beyond it) or an opening night (only when the first listed date sits by the film's release date — theaters only list what's still to come, so a run with a day off would otherwise look like it opens again), and restorations. A regular run only becomes a pick on its opening or last-chance day, and only when it's well reviewed.
+**Films** are scored on their own terms: a one-night or special screening, then reviews (Metacritic, or Rotten Tomatoes), a last chance (the final day or two of a run, when the theater has posted dates beyond it) or an opening night (only when the first listed date sits by the film's release date — theaters only list what's still to come, so a run with a day off would otherwise look like it opens again), and restorations — up to 9 — then your [film taste](#your-film-taste) on top, up to 11 in all (a favorite band still outranks any film). A regular run only becomes a pick on its opening or last-chance day, and only when it's well reviewed or squarely your kind of film; one of your favorite films is a pick whenever it plays. On a day's page, **At the movies** lists one-off screenings and your kind of film first.
 
 **A sentence for each day**, built from its picks (_"A favorite at the Tractor Tavern, Wet Leg, who sounds like Alvvays and a one-night Paris, Texas."_), and one for the week (_"Best night: Friday (PUP). Quiet: Mon, Tue."_). The `/curate` routine's reasons, when fresh, lift those shows and show as their reason.
 
@@ -367,7 +369,30 @@ Each film shows its poster, rating, runtime, director, cast, synopsis, showtimes
   - Other action films need Metacritic ≥ 65 or Rotten Tomatoes ≥ 80.
   - An action film with no scores on record (a restoration, a new import) gets the benefit of the doubt unless it's a superhero film.
 
-Genres, franchise and critic scores come from [Wikidata](https://www.wikidata.org/), looked up by the TMDB id the theater supplies. It's free, needs no key, and is cached for a week. **Hide film** in a film's details hides it; hidden films are listed under **Show what's left out** with a button to bring them back, and stay hidden even if the film briefly drops out of a refresh.
+Genres, franchise, critic scores and crew (directors, writers, composers, cinematographers) come from [Wikidata](https://www.wikidata.org/), looked up by the TMDB id the theater supplies. It's free, needs no key, and is cached for a week. **Hide film** in a film's details hides it; hidden films are listed under **Show what's left out** with a button to bring them back, and stay hidden even if the film briefly drops out of a refresh.
+
+### Your film taste
+
+`film-taste.json` at the repo root is your film taste (`src/cinema/taste.js`). It starts from the films and shows you love (`favorites`), and lists what was read from them (crew, cast and genres looked up on Wikidata), each naming the favorites it comes from:
+
+- **people**: directors, writers, composers, cinematographers and actors, weighted 1–5. Nick Cave & Warren Ellis scored five of the favorites, Jonny Greenwood three, Roger Deakins shot three, Taylor Sheridan wrote or directed three, and Hiro Murai directed two of the shows;
+- **genres**: matched against Wikidata's genres and the theater's ("western" also matches "revisionist Western");
+- **themes**: patterns tested against the synopsis (outlaws on the frontier, crime on the border, the Vatican…).
+
+A film's taste score adds up what matches:
+
+| Part | What it checks | Points |
+| --- | --- | --- |
+| **Favorite** | The film is one of yours, by TMDB id (so a remake or a sequel never passes for it), or by title for a listing without one ("Throwback Thursday: Drive", "Come and See (4K)") | 4 |
+| **People** | Weight × how much the role shapes a film: directing 0.6, writing 0.5, the score or the camera 0.4, acting 0.35. The director and cast come from the theater, the rest from Wikidata. Each person counts once, in their biggest role | 0–3.5 |
+| **Genres** | Weight × 0.4. Each of the film's genres counts toward its single best match, so "crime thriller" isn't also "crime" and "thriller" | 0–2.5 |
+| **Themes** | Weight × 0.3 | 0–1.5 |
+
+Within a part, matches combine with diminishing returns (best + ½·second + ¼·third), and the total runs from −3 to 6: a negative weight steers away from a person, genre or theme. At 3 or more a film is squarely your kind of film. From 1.5, a film's row says who it's like, naming the favorites behind its strongest person or genre match (_"Like The Prestige"_ for a Christopher Nolan film); a synopsis adds to the score but is never enough on its own to name them. A favorite's own reasons only name your other favorites. Its details list every reason (_"Directed by Paul Thomas Anderson (There Will Be Blood, Phantom Thread)"_, _"Score by Jonny Greenwood (…)"_) along with who wrote it, scored it and shot it. On the Week screen the films line says _"a favorite"_ or _"like Sicario"_.
+
+A screening of one of your favorite films anywhere else (a movie house's calendar, a bar's movie night) scores 8, like a show by an artist you like, and says so.
+
+Edit the file to tune it: add a favorite (with its TMDB id if you have it), change a weight, add a person under `aka` spellings, or a theme. It's re-read whenever it changes. No restart needed, and in Docker it's bind-mounted. An entry that doesn't parse (say, a theme pattern with a typo) is skipped with a warning in the log. The rest still counts. Delete the file to rank films on reviews and occasion alone.
 
 **How it's fetched** (`src/cinema/indy.js`). The Grand's website runs on the Indy Systems ticketing platform, whose frontend loads showtimes from a GraphQL endpoint on the theater's own domain. EventLight makes the same requests the site does: one to list the dates with showtimes, then one per date. That's a few dozen small requests per refresh. Note that the theater's `robots.txt` disallows `/graphql` for crawlers. Other Indy Systems cinemas can be added to `THEATERS` in `src/cinema/index.js`; their `site-id` / `circuit-id` are the headers their website sends.
 
@@ -401,7 +426,7 @@ src/
   scheduler/       node-cron job + manual triggers
   scoring/         preference engine + close-to-home distances
   enrich/          artist genres (MusicBrainz), similar artists (ListenBrainz), artist profiles (+ Wikipedia, Apple)
-  cinema/          movie listings (The Grand Cinema via Indy Systems), Wikidata facts, kids/action filter
+  cinema/          movie listings (The Grand Cinema via Indy Systems), Wikidata facts, kids/action filter, your film taste
   lineup.js        parse the bill (headliner, support) out of an event title
   kinds.js         what a listing is (Music, Stand-up, Trivia…), its flags, and recurring-night keys
   feel.js          the line under each listing: genres, for fans of, a descriptor, a song preview
@@ -416,6 +441,7 @@ src/
 feeds.json         RSS/iCal/JSON-LD feed config (editable in UI)
 scrapers.json      scraper config (editable in UI)
 taste-profile.json one-off Spotify-derived preference seed (optional)
+film-taste.json    your favorite films and shows, and the people, genres and themes read from them
 Dockerfile         Playwright-based image (Chromium included)
 docker-compose.yml one-command stack with persistent volumes
 .env.example       configuration template
@@ -472,7 +498,7 @@ All filter params (`category`, `city`, `genres`, `sources`, `search`, `onlyInter
 npm test
 ```
 
-Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, the Week screen and day pages (the rolling seven days, top picks, each day's picks matching its page, films alongside shows, Going / Maybe, show and artist details), the listings API (films a page at a time, calendar counts, kinds), kinds and flags, regulars and runs, picks and the day's sentence, film scores, the feel line (genres, for fans of, descriptors, previews), background profile lookups, artist profiles (parsing MusicBrainz, Wikipedia and Apple answers, caching, partial lookups), and the `.ics` builder.
+Runs the `node:test` suite covering date/time parsing (including year inference and the "band names with numbers" cases), URL sanitisation, scraper config validation and item mapping, lineup parsing against real venue titles, the preference engine (against an in-memory database), the enrichment and VenuePilot/Ticketmaster parsers, the movie filter and listings grouping, the Week screen and day pages (the rolling seven days, top picks, each day's picks matching its page, films alongside shows, Going / Maybe, show and artist details), the listings API (films a page at a time, calendar counts, kinds), kinds and flags, regulars and runs, picks and the day's sentence, film scores, your film taste (favorites, people by role, genres, themes, the "like" line, and how it lifts films on the Week screen and a day's page), the feel line (genres, for fans of, descriptors, previews), background profile lookups, artist profiles (parsing MusicBrainz, Wikipedia and Apple answers, caching, partial lookups), and the `.ics` builder.
 
 GitHub Actions runs the same suite on every pull request and every push to `main` (`.github/workflows/test.yml`).
 

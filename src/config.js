@@ -16,6 +16,9 @@ export const DB_PATH = process.env.EVENTLIGHT_DB || path.join(DATA_DIR, 'events.
 export const PUBLIC_DIR = path.join(__dirname, 'public');
 export const FEEDS_PATH = path.join(ROOT_DIR, 'feeds.json');
 export const SCRAPERS_PATH = path.join(ROOT_DIR, 'scrapers.json');
+// Your film taste (see src/cinema/taste.js). An empty EVENTLIGHT_FILM_TASTE
+// turns it off, so tests don't depend on the owner's favorites.
+export const FILM_TASTE_PATH = process.env.EVENTLIGHT_FILM_TASTE ?? path.join(ROOT_DIR, 'film-taste.json');
 export const ENV_PATH = path.join(ROOT_DIR, '.env');
 
 export const PORT = parseInt(process.env.PORT || '3000', 10);

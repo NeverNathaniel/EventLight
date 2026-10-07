@@ -28,6 +28,8 @@ services:
       # Bind-mount runtime config so edits in the Settings UI persist on the host.
       - ./feeds.json:/app/feeds.json
       - ./scrapers.json:/app/scrapers.json
+      # Your film taste — edit it on the host; it's re-read when it changes.
+      - ./film-taste.json:/app/film-taste.json
       - ./.env:/app/.env
     restart: unless-stopped
     healthcheck:
