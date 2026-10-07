@@ -13,7 +13,13 @@ import { artistKey } from './lineup.js';
 import { loadFacts, attachFeel, headlinerFound } from './feel.js';
 import { filmScore, pickScore, regularsIndex, loadCurated } from './curation.js';
 import { buildContext } from './scoring/engine.js';
+import { loadFilmTaste, favoriteOf } from './cinema/taste.js';
 import { todayISO } from './dates.js';
+
+// A screening of one of your favorite films at a venue that isn't a cinema
+// (a movie house's VenuePilot calendar, a bar's movie night) scores like a
+// show by an artist you like.
+const FAVORITE_SCREENING = 8;
 
 export function annotate(items, {
   now = Date.now(),
@@ -22,6 +28,7 @@ export function annotate(items, {
   horizonByTheater = new Map(),
   curated = loadCurated(now),
   regulars = regularsIndex(today),
+  filmTaste = loadFilmTaste(),
 } = {}) {
   if (!items.length) return items;
   const facts = loadFacts(items, ctx);
@@ -36,7 +43,7 @@ export function annotate(items, {
       : usesTitle(kind, lineup) ? cleanTitle(item.title) : lineup[0] || cleanTitle(item.title);
     let flags = film ? [] : flagsOf(item);
     if (film) {
-      item._film = filmScore(item, { today, horizonByTheater });
+      item._film = filmScore(item, { today, horizonByTheater, taste: filmTaste });
       flags = flags.concat(item._film.flags);
       item._reasons = item._film.reasons;
       item._score = item._film.score;
@@ -45,6 +52,13 @@ export function annotate(items, {
     } else {
       item._regular = regulars.regular.get(item.id) || null;
       item._run = regulars.run.get(item.id) || null;
+      // Once per item, should a list be dressed twice.
+      const favorite = kind.family === 'film' && !item._favoriteFilm ? favoriteOf({ title: cleanTitle(item.title) }, filmTaste) : null;
+      if (favorite) {
+        item._favoriteFilm = favorite.title;
+        item._score = (Number(item._score) || 0) + FAVORITE_SCREENING;
+        item._reasons = [{ kind: 'favorite', text: `${favorite.title} is one of your favorite films` }, ...(item._reasons || [])];
+      }
     }
     item._flags = sortFlags(flags);
     item._curated = (!film && curated?.reasons.get(item.id)) || null;

@@ -108,7 +108,8 @@ CREATE TABLE IF NOT EXISTS artist_profiles (
 -- ── Movies (cinema listings) ────────────────────────────────────────────
 -- One row per film per theater, replaced on each refresh. Showtimes are a
 -- JSON array of UTC ISO datetimes. wd_* columns are Wikidata facts looked up
--- by TMDB id (used by the kids / action filters); hidden is your own ✕.
+-- by TMDB id (used by the kids / action filters and your film taste); hidden
+-- is your own ✕.
 CREATE TABLE IF NOT EXISTS movies (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   theater_id     TEXT NOT NULL,             -- e.g. grand-cinema
@@ -136,6 +137,7 @@ CREATE TABLE IF NOT EXISTS movies (
   wd_series      TEXT,                      -- franchise / film series, if any
   rt_score       INTEGER,                   -- Rotten Tomatoes %
   mc_score       INTEGER,                   -- Metacritic /100
+  wd_crew        TEXT,                      -- JSON { director, writer, composer, cinematographer }
   wd_fetched_at  TEXT,
   hidden         INTEGER NOT NULL DEFAULT 0,
   updated_at     TEXT NOT NULL DEFAULT (datetime('now')),

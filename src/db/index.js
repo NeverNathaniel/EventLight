@@ -31,6 +31,7 @@ for (const [table, name, def] of [
   ['movies', 'peak_showings', 'INTEGER NOT NULL DEFAULT 0'],
   ['events', 'headliner_key', 'TEXT'],
   ['events', 'going', 'INTEGER NOT NULL DEFAULT 0'],
+  ['movies', 'wd_crew', 'TEXT'],
 ]) {
   const have = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === name);
   if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);

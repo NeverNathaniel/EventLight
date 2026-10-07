@@ -845,9 +845,14 @@ function filmFeel(item) {
   const genre = String(item.genre || '').split(/\s*[,/|]\s*/)[0].trim().toLowerCase() || null;
   const crit = item.mc_score != null ? `MC ${item.mc_score}` : item.rt_score != null ? `RT ${item.rt_score}%` : null;
   const curated = curatedText(item._curated);
-  const filmText = [item._flags?.[0]?.label, item.director && `dir. ${item.director}`].filter(Boolean).join(' · ');
+  const flag = item._flags?.[0]?.label;
+  const filmText = [flag, item.director && `dir. ${item.director}`].filter(Boolean).join(' · ');
+  // Your taste says who it's like ("Like Sicario & Wind River"), after the
+  // flag that makes it an occasion ("One night only · ♥ One of your favorites").
+  const taste = item._film?.taste?.link;
   let link = null;
   if (curated) link = { kind: 'curated', text: curated };
+  else if (taste) link = { ...taste, pre: flag || null };
   else if (filmText) link = { kind: 'film', text: filmText };
   return {
     tags: [],
